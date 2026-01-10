@@ -1,0 +1,6 @@
+[
+  { "email": "admin@test.com", "password": "123456", "firstName": "Admin", "lastName": "User", "role": "admin" },
+  { "email": "teacher1@test.com", "password": "123456", "firstName": "John", "lastName": "Doe", "role": "teacher" },
+  { "email": "teacher2@test.com", "password": "123456", "firstName": "Jane", "lastName": "Smith", "role": "teacher" },
+  { "email": "parent1@test.com", "password": "123456", "firstName": "Paul", "lastName": "Parent", "role": "parent" }
+]

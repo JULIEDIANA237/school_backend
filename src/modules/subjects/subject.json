@@ -1,0 +1,4 @@
+[{ "name": "Maths", "code": "MATH", "coefficient": 4 },
+    { "name": "Physique", "code": "PHY", "coefficient": 3 },
+    { "name": "SVT", "code": "SVT", "coefficient": 2 },
+    { "name": "Français", "code": "FR", "coefficient": 2 }]
