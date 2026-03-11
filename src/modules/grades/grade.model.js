@@ -18,6 +18,10 @@ const gradeSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0
+    },
+    comment: {
+      type: String,
+      trim: true
     }
   },
   { timestamps: true }

@@ -4,12 +4,16 @@ const periodSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      enum: [
-        "Trimestre 1",
-        "Trimestre 2",
-        "Trimestre 3"
-      ],
       required: true
+    },
+    type: {
+      type: String,
+      enum: ["TRIMESTRE", "SEQUENCE"],
+      default: "SEQUENCE"
+    },
+    parentPeriod: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Period"
     },
     year: {
       type: String,

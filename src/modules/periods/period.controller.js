@@ -30,6 +30,15 @@ const PeriodController = {
     }
   },
 
+  async getActiveYearPeriods(req, res) {
+    try {
+      const periods = await PeriodService.getPeriodsByActiveYear();
+      res.json(periods);
+    } catch (error) {
+      res.status(404).json({ error: error.message });
+    }
+  },
+
   async list(req, res) {
     const periods = await PeriodService.getPeriodsByYear(req.params.year);
     res.json(periods);

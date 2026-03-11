@@ -11,6 +11,13 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "teacher", "parent"],
       default: "parent",
     },
+    settings: {
+      notifications: {
+        email: { type: Boolean, default: true },
+        push: { type: Boolean, default: true },
+        inApp: { type: Boolean, default: true },
+      },
+    },
   },
   { timestamps: true }
 );

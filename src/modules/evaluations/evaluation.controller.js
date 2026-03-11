@@ -13,6 +13,33 @@ const createEvaluation = async (req, res) => {
   }
 };
 
+/* ============================
+   ✏️ ÉDITION D’UNE ÉVALUATION
+============================ */
+const updateEvaluation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teacherId = req.user.id;
+
+    const evaluation = await evalService.updateEvaluation(
+      id,
+      teacherId,
+      req.body
+    );
+
+    return res.status(200).json({
+      message: "Evaluation updated",
+      data: evaluation
+    });
+
+  } catch (error) {
+    console.error("🔥 BACK ERROR:", error);
+  return res.status(400).json({ error: error.message });
+  }
+};
+
+
+
 // evaluation.controller.js
 const listEvaluations = async (req, res) => {
   try {
@@ -47,11 +74,52 @@ const publishEvaluation = async (req, res) => {
   }
 };
 
-const addGrade = async (req, res) => {
+const unpublishEvaluation = async (req, res) => {
   try {
-    const { score, comment } = req.body;
-    const grade = await evalService.addGrade(req.params.id, req.body.studentId, score, comment);
+    const evaluation = await evalService.unpublishEvaluation(req.params.id, req.user.id);
+    res.json({ message: "Evaluation unpublished", data: evaluation });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const bulkUnpublish = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    const result = await evalService.unpublishManyEvaluations(ids, req.user.id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const addGrade = async (req, res) => {
+  console.log("📥 [EvaluationController] addGrade called with body:", req.body, "params:", req.params);
+  try {
+    const { score, comment, studentId } = req.body;
+    if (!studentId || score === undefined) {
+      return res.status(400).json({ error: "studentId and score are required" });
+    }
+    
+    // req.user.id is the teacher's ID from JWT middleware
+    const grade = await evalService.addGrade(req.params.id, req.user.id, studentId, score, comment);
+    console.log("✅ [EvaluationController] grade added:", grade);
     res.status(201).json({ message: "Grade added", data: grade });
+  } catch (error) {
+    console.error("❌ [EvaluationController] addGrade error:", error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const deleteEvaluation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const teacherId = req.user.id;
+    const result = await evalService.deleteEvaluation(id, teacherId);
+    res.json(result);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -59,7 +127,11 @@ const addGrade = async (req, res) => {
 
 module.exports = {
   createEvaluation,
+  updateEvaluation,
   listEvaluations,
   publishEvaluation,
-  addGrade
+  unpublishEvaluation,
+  bulkUnpublish,
+  addGrade,
+  deleteEvaluation
 };

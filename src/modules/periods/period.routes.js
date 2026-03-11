@@ -29,6 +29,12 @@ router.get(
   PeriodController.getActive
 );
 
+router.get(
+  "/active-year",
+  protect,
+  PeriodController.getActiveYearPeriods
+);
+
 // 📅 Lister les périodes d’une année donnée
 router.get(
   "/year/:year",

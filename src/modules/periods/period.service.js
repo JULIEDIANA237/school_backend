@@ -4,23 +4,37 @@ const Bulletin = require("../bulletins/bulletin.model");
 
 // Créer une période
 const createPeriod = async (data) => {
-  if (new Date(data.startDate) >= new Date(data.endDate)) {
+  const startDate = new Date(data.startDate);
+  const endDate = new Date(data.endDate);
+
+  if (startDate >= endDate) {
     throw new Error("Invalid period dates");
   }
 
-  // Vérifier chevauchement sur la même année
+  // Si c'est une Séquence, vérifier qu'elle est dans le Trimestre parent
+  if (data.type === "SEQUENCE" && data.parentPeriod) {
+    const parent = await Period.findById(data.parentPeriod);
+    if (!parent) {
+      throw new Error("Parent period not found");
+    }
+
+    if (startDate < new Date(parent.startDate) || endDate > new Date(parent.endDate)) {
+      throw new Error("Sequence dates must be within parent trimester dates");
+    }
+  }
+
+  // Vérifier chevauchement sur la même année ET LE MÊME TYPE
+  // On utilise des inégalités strictes pour permettre aux périodes de se "toucher"
+  // (ex: l'une finit le 01/06 et l'autre commence le 01/06)
   const overlap = await Period.findOne({
     year: data.year,
-    $or: [
-      {
-        startDate: { $lte: data.endDate },
-        endDate: { $gte: data.startDate }
-      }
-    ]
+    type: data.type,
+    startDate: { $lt: endDate },
+    endDate: { $gt: startDate }
   });
 
   if (overlap) {
-    throw new Error("Period dates overlap");
+    throw new Error(`Period dates overlap with existing period: "${overlap.name}"`);
   }
 
   return await Period.create(data);
@@ -80,11 +94,17 @@ const deletePeriod = async (periodId) => {
   return await Period.findByIdAndDelete(periodId);
 };
 
+const getPeriodsByActiveYear = async () => {
+  const activePeriod = await getActivePeriod();
+  return await getPeriodsByYear(activePeriod.year);
+};
+
 module.exports = {
   createPeriod,
   activatePeriod,
   getActivePeriod,
   getActiveYear,
   getPeriodsByYear,
+  getPeriodsByActiveYear,
   deletePeriod
 };
