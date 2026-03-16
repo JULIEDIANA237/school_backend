@@ -66,10 +66,18 @@ const getStudentsByParent = async (parentId) => {
   }).populate("class");
 };
 
+// Lister tous les élèves (admin)
+const getAllStudents = async () => {
+  return await Student.find({ isActive: true })
+    .populate("class")
+    .sort({ lastName: 1 });
+};
+
 module.exports = {
   createStudent,
   updateStudent,
   getStudentsByClass,
+  getAllStudents,
   addParentToStudent,
   changeStudentClass,
   deactivateStudent,

@@ -12,6 +12,13 @@ router.post(
   Controller.assign
 );
 
+router.get(
+  "/",
+  protect,
+  authorize("admin"),
+  Controller.getAll
+);
+
 router.delete(
   "/:id",
   protect,

@@ -1,8 +1,11 @@
 const User = require("./user.model");
 const userService = require("./user.service");
 
-const getAll = async (_, res) =>
-  res.json(await User.find().select("-password"));
+const getAll = async (req, res) => {
+  const { role } = req.query;
+  const filter = role ? { role } : {};
+  res.json(await User.find(filter).select("-password"));
+};
 
 const getOne = async (req, res) =>
   res.json(await User.findById(req.params.id).select("-password"));
@@ -24,6 +27,17 @@ const updateMe = async (req, res) => {
   }
 };
 
+const create = async (req, res) => {
+  try {
+    const { password, ...rest } = req.body;
+    const hashedPassword = await bcrypt.hash(password || "EduFlow@2025", 10);
+    const user = await userService.createUser({ ...rest, password: hashedPassword });
+    res.status(201).json(user);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
@@ -40,6 +54,7 @@ const changePassword = async (req, res) => {
 module.exports = {
   getAll,
   getOne,
+  create,
   update,
   remove,
   updateMe,

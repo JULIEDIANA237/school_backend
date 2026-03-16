@@ -12,6 +12,7 @@ router.put("/me", controller.updateMe);
 router.put("/me/password", controller.changePassword);
 
 // Routes d'administration
+router.post("/", authorize("admin"), controller.create);
 router.get("/", authorize("admin"), controller.getAll);
 router.get("/:id", authorize("admin"), controller.getOne);
 router.put("/:id", authorize("admin"), controller.update);

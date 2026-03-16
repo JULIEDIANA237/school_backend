@@ -30,6 +30,11 @@ const TeacherAssignmentController = {
   async classSubjects(req, res) {
     const data = await Service.getClassSubjects(req.params.classId);
     res.json(data);
+  },
+
+  async getAll(req, res) {
+    const data = await Service.getAllAssignments();
+    res.json(data);
   }
 };
 

@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema(
     lastName: { type: String, required: true },
     role: {
       type: String,
-      enum: ["admin", "teacher", "parent"],
+      enum: ["admin", "teacher", "parent", "student"],
       default: "parent",
     },
     settings: {

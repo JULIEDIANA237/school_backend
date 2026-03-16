@@ -11,6 +11,7 @@ const classSchema = new Schema(
     students: [{ type: Types.ObjectId, ref: "Student" }],
     subjects: [{ type: Types.ObjectId, ref: "Subject" }],
     teachers: [{ type: Types.ObjectId, ref: "User" }],
+    principalTeacher: { type: Types.ObjectId, ref: "User" },
 
     isActive: { type: Boolean, default: true }
   },

@@ -52,7 +52,11 @@ const StudentController = {
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
-  }
+  },
+  async getAll(req, res) {
+    const students = await StudentService.getAllStudents();
+    res.json(students);
+  },
 };
 
 module.exports = StudentController;

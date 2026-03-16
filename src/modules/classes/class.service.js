@@ -66,9 +66,10 @@ const addTeacherToClass = async (classId, teacherId) => {
  */
 const getAllClasses = async () => {
   return await Class.find()
-    .populate("students", "name matricule")
+    .populate("students", "firstName lastName matricule")
     .populate("subjects", "name code")
-    .populate("teachers", "name email");
+    .populate("teachers", "firstName lastName email")
+    .populate("principalTeacher", "firstName lastName email");
 };
 
 /**
@@ -114,7 +115,8 @@ const getClassDetails = async (classId) => {
   return await Class.findById(classId)
     .populate("students")
     .populate("subjects")
-    .populate("teachers");
+    .populate("teachers")
+    .populate("principalTeacher");
 };
 
 module.exports = {

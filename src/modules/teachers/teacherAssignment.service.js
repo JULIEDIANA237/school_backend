@@ -45,10 +45,16 @@ const isTeacherAssigned = async (teacherId, classId, subjectId) => {
   });
 };
 
+const getAllAssignments = async () => {
+  return await TeacherAssignment.find()
+    .populate("teacher class subject");
+};
+
 module.exports = {
   assignTeacher,
   unassignTeacher,
   getTeacherClasses,
   getClassSubjects,
-  isTeacherAssigned
+  isTeacherAssigned,
+  getAllAssignments
 };

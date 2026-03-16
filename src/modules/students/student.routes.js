@@ -6,6 +6,7 @@ const { authorize } = require("../../middlewares/role.middleware");
 const router = express.Router();
 
 router.post("/", protect, authorize("admin"), StudentController.create);
+router.get("/", protect, authorize("admin"), StudentController.getAll);
 router.put("/:id", protect, authorize("admin"), StudentController.update);
 
 router.get("/class/:classId", protect, StudentController.byClass);

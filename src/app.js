@@ -11,6 +11,8 @@ const studentRoutes = require("./modules/students/student.routes");
 const teacherRoutes = require("./modules/teachers/teacherAssignment.routes");
 const subjectRoutes = require("./modules/subjects/subject.routes");
 const notificationRoutes = require("./modules/notifications/notification.routes");
+const userRoutes = require("./modules/users/user.routes");
+const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
 
 const app = express();
 
@@ -45,6 +47,12 @@ app.use("/api/subjects", subjectRoutes);
 
 // API NOTIFICATIONS
 app.use("/api/notifications", notificationRoutes);
+
+// API USERS
+app.use("/api/users", userRoutes);
+
+// API ADMIN DASHBOARD
+app.use("/api/admin/dashboard", dashboardRoutes);
 
 const MONGO_URI = "mongodb+srv://Julie237:Module237@cluster0.e256eth.mongodb.net/school_api?appName=Cluster0";
 
