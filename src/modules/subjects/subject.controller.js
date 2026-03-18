@@ -26,14 +26,21 @@ const SubjectController = {
     }
   },
 
-  async list(req, res) {
+  async getAll(req, res) {
     console.log("[CONTROLLER] Récupération des sujets actifs");
 
+    const subjects = await SubjectService.getActiveSubjects();
+    res.json(subjects);
+  },
+
+  async importExcel(req, res) {
     try {
-      const subjects = await SubjectService.getActiveSubjects();
-      res.json(subjects);
+      if (!req.file) {
+        return res.status(400).json({ error: "Aucun fichier fourni." });
+      }
+      const result = await SubjectService.importSubjectsFromExcel(req.file.buffer);
+      res.status(200).json(result);
     } catch (error) {
-      console.error("[CONTROLLER] Erreur liste sujets :", error.message);
       res.status(400).json({ error: error.message });
     }
   },

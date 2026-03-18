@@ -12,8 +12,36 @@ const create = async (req, res) => {
  * Récupérer toutes les classes
  */
 const getAll = async (req, res) => {
-  const classes = await service.getAllClasses();
+  const { schoolYearId } = req.query;
+  const classes = await service.getAllClasses(schoolYearId);
   res.json(classes);
+};
+
+const update = async (req, res) => {
+  const classe = await service.updateClass(req.params.id, req.body);
+  res.json(classe);
+};
+
+const remove = async (req, res) => {
+  await service.deleteClass(req.params.id);
+  res.status(204).send();
+};
+
+/**
+ * Import des classes
+ */
+const importClasses = async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Fichier requis" });
+  const result = await service.importClassesFromExcel(req.file.buffer);
+  res.json(result);
+};
+
+/**
+ * Détails complets d'une classe
+ */
+const details = async (req, res) => {
+  const classe = await service.getClassDetails(req.params.id);
+  res.json(classe);
 };
 
 /**
@@ -40,14 +68,6 @@ const addSubject = async (req, res) => {
 const addTeacher = async (req, res) => {
   const { classId, teacherId } = req.params;
   const classe = await service.addTeacherToClass(classId, teacherId);
-  res.json(classe);
-};
-
-/**
- * Détails complets d'une classe
- */
-const details = async (req, res) => {
-  const classe = await service.getClassDetails(req.params.id);
   res.json(classe);
 };
 
@@ -79,6 +99,9 @@ module.exports = {
   create,
   getAll,
   details,
+  update,
+  remove,
+  importClasses,
   addStudent,
   addSubject,
   addTeacher,

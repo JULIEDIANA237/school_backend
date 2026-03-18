@@ -57,6 +57,24 @@ const StudentController = {
     const students = await StudentService.getAllStudents();
     res.json(students);
   },
+
+  async importExcel(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "Aucun fichier fourni." });
+      }
+      const { classId, schoolYearId } = req.body;
+      
+      const result = await StudentService.importStudentsFromExcel(
+        req.file.buffer, 
+        classId, 
+        schoolYearId || req.query.schoolYearId
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  },
 };
 
 module.exports = StudentController;

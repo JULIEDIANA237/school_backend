@@ -9,7 +9,7 @@ const router = express.Router();
 router.post(
   "/",
   protect,
-  authorize(["teacher", "admin"]),
+  authorize("teacher", "admin"),
   BulletinController.createOrUpdate
 );
 
@@ -17,7 +17,7 @@ router.post(
 router.get(
   "/class/:classId/period/:periodId",
   protect,
-  authorize(["teacher", "admin"]),
+  authorize("teacher", "admin"),
   BulletinController.getByClass
 );
 
@@ -25,7 +25,7 @@ router.get(
 router.patch(
   "/publish/:bulletinId",
   protect,
-  authorize(["teacher", "admin"]),
+  authorize("teacher", "admin"),
   BulletinController.publish
 );
 
@@ -33,7 +33,7 @@ router.patch(
 router.get(
   "/parent",
   protect,
-  authorize(["parent"]),
+  authorize("parent"),
   BulletinController.getPublishedForParent
 );
 

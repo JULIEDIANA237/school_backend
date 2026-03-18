@@ -14,11 +14,6 @@ const subjectSchema = new mongoose.Schema(
       unique: true,
       index: true // ex: MATH, PHY, FR
     },
-    coefficient: {
-      type: Number,
-      default: 1,
-      min: 0.1
-    },
     isActive: {
       type: Boolean,
       default: true

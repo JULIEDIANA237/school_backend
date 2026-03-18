@@ -28,6 +28,16 @@ const BulletinController = {
   async publish(req, res) {
     try {
       const { bulletinId } = req.params;
+
+      if (req.user.role === "teacher") {
+        const bulletinBefore = await require("./bulletin.model").findById(bulletinId).populate("class");
+        if (!bulletinBefore) return res.status(404).json({ error: "Bulletin introuvable" });
+
+        if (bulletinBefore.class.principalTeacher?.toString() !== req.user.id) {
+            return res.status(403).json({ error: "Seul le professeur principal de cette classe peut publier ce bulletin." });
+        }
+      }
+
       const bulletin = await BulletinService.publishBulletin(bulletinId);
       res.status(200).json({ message: "Bulletin publié", data: bulletin });
     } catch (error) {

@@ -25,6 +25,23 @@ const calculateBulletin = async (studentId, classId, periodId) => {
   const period = await Period.findById(periodId);
   if (!period) throw new Error("Period not found");
 
+  const ClassModel = require("../classes/class.model");
+  const classDoc = await ClassModel.findById(classId);
+  if (!classDoc) throw new Error("Class not found");
+
+  // Création du dictionnaire des matières de la classe
+  const classSubjectMap = {};
+  if (classDoc.subjects && classDoc.subjects.length > 0) {
+    classDoc.subjects.forEach(s => {
+      if (s.subject) {
+        classSubjectMap[s.subject.toString()] = {
+          coefficient: s.coefficient || 1,
+          group: s.group || 1
+        };
+      }
+    });
+  }
+
   let periodIds = [periodId];
   
   // Si c'est un trimestre, on récupère les IDs des séquences rattachées
@@ -67,13 +84,18 @@ const calculateBulletin = async (studentId, classId, periodId) => {
     );
 
     const subjectId = evalItem.subject._id.toString();
+    const classSubj = classSubjectMap[subjectId] || { 
+      coefficient: evalItem.subject.coefficient || 1, 
+      group: 1 
+    };
 
     // Initialisation de la matière
     if (!subjectsMap[subjectId]) {
       subjectsMap[subjectId] = {
         total: 0,
         coef: 0,
-        subjectCoefficient: evalItem.subject.coefficient || 1
+        subjectCoefficient: classSubj.coefficient,
+        group: classSubj.group
       };
     }
 
@@ -87,10 +109,11 @@ const calculateBulletin = async (studentId, classId, periodId) => {
 
   // Transformation en tableau exploitable
   const averages = Object.entries(subjectsMap).map(
-    ([subjectId, { total, coef, subjectCoefficient }]) => ({
+    ([subjectId, { total, coef, subjectCoefficient, group }]) => ({
       subject: subjectId,
       average: coef ? parseFloat((total / coef).toFixed(2)) : 0,
-      coefficient: subjectCoefficient
+      coefficient: subjectCoefficient,
+      group: group
     })
   );
 

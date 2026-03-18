@@ -13,6 +13,9 @@ const subjectRoutes = require("./modules/subjects/subject.routes");
 const notificationRoutes = require("./modules/notifications/notification.routes");
 const userRoutes = require("./modules/users/user.routes");
 const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
+const cycleRoutes = require("./modules/cycles/cycle.routes");
+const classSubjectRoutes = require("./modules/classes/classSubject.routes");
+const schoolYearRoutes = require("./modules/schoolYear/schoolYear.routes");
 
 const app = express();
 
@@ -53,6 +56,11 @@ app.use("/api/users", userRoutes);
 
 // API ADMIN DASHBOARD
 app.use("/api/admin/dashboard", dashboardRoutes);
+
+// API CYCLES & CLASS SUBJECTS
+app.use("/api/cycles", cycleRoutes);
+app.use("/api/class-subjects", classSubjectRoutes);
+app.use("/api/school-years", schoolYearRoutes);
 
 const MONGO_URI = "mongodb+srv://Julie237:Module237@cluster0.e256eth.mongodb.net/school_api?appName=Cluster0";
 

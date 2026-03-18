@@ -1,60 +1,29 @@
-const TeacherAssignment = require("./teacherClassSubject.model");
-const Evaluation = require("../evaluations/evaluation.model");
+const TeacherAssignment = require("./teacherAssignment.model");
 
-// Affecter un enseignant
-const assignTeacher = async ({ teacher, classId, subject }) => {
-  return await TeacherAssignment.create({
-    teacher,
-    class: classId,
-    subject
-  });
-};
+const TeacherAssignmentService = {
+  async assign(data) {
+    return await TeacherAssignment.findOneAndUpdate(
+      {
+        teacherId: data.teacherId,
+        classId: data.classId,
+        subjectId: data.subjectId,
+        schoolYearId: data.schoolYearId,
+      },
+      data,
+      { upsert: true, new: true }
+    );
+  },
 
-// Désaffecter (si aucune évaluation)
-const unassignTeacher = async (assignmentId) => {
-  const used = await Evaluation.exists({
-    assignment: assignmentId
-  });
+  async getAssignments(query) {
+    return await TeacherAssignment.find(query)
+      .populate("teacherId", "firstName lastName")
+      .populate("classId", "name")
+      .populate("subjectId", "name");
+  },
 
-  if (used) {
-    throw new Error("Assignment already used in evaluations");
+  async removeAssignment(id) {
+    return await TeacherAssignment.findByIdAndDelete(id);
   }
-
-  return await TeacherAssignment.findByIdAndDelete(assignmentId);
 };
 
-// Classes enseignées par un prof
-const getTeacherClasses = async (teacherId) => {
-  return await TeacherAssignment.find({ teacher: teacherId })
-    .populate("class subject")
-    .sort({ "class.name": 1 });
-};
-
-// Matières enseignées dans une classe
-const getClassSubjects = async (classId) => {
-  return await TeacherAssignment.find({ class: classId })
-    .populate("teacher subject");
-};
-
-// Vérification métier clé
-const isTeacherAssigned = async (teacherId, classId, subjectId) => {
-  return await TeacherAssignment.exists({
-    teacher: teacherId,
-    class: classId,
-    subject: subjectId
-  });
-};
-
-const getAllAssignments = async () => {
-  return await TeacherAssignment.find()
-    .populate("teacher class subject");
-};
-
-module.exports = {
-  assignTeacher,
-  unassignTeacher,
-  getTeacherClasses,
-  getClassSubjects,
-  isTeacherAssigned,
-  getAllAssignments
-};
+module.exports = TeacherAssignmentService;

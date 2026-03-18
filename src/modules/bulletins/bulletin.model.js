@@ -12,6 +12,8 @@ const bulletinSchema = new Schema(
       {
         subject: { type: Schema.Types.ObjectId, ref: "Subject" },
         average: Number,
+        coefficient: Number,
+        group: Number,
         rank: Number
       }
     ],

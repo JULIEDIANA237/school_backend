@@ -1,13 +1,16 @@
 const express = require("express");
+const multer = require("multer");
 const StudentController = require("./student.controller");
 const { protect } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/role.middleware");
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/", protect, authorize("admin"), StudentController.create);
-router.get("/", protect, authorize("admin"), StudentController.getAll);
-router.put("/:id", protect, authorize("admin"), StudentController.update);
+router.post("/", protect, authorize("admin", "secretary"), StudentController.create);
+router.post("/import", protect, authorize("admin", "secretary"), upload.single("file"), StudentController.importExcel);
+router.get("/", protect, authorize("admin", "secretary"), StudentController.getAll);
+router.put("/:id", protect, authorize("admin", "secretary"), StudentController.update);
 
 router.get("/class/:classId", protect, StudentController.byClass);
 router.get("/parent/me", protect, authorize("parent"), StudentController.byParent);
@@ -15,21 +18,21 @@ router.get("/parent/me", protect, authorize("parent"), StudentController.byParen
 router.post(
   "/:studentId/parent",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   StudentController.addParent
 );
 
 router.patch(
   "/:studentId/class",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   StudentController.changeClass
 );
 
 router.patch(
   "/deactivate/:studentId",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   StudentController.deactivate
 );
 
