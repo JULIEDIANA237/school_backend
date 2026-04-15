@@ -2,7 +2,9 @@ const express = require("express");
 const Controller = require("./teacherAssignment.controller");
 const { protect } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/role.middleware");
+const multer = require("multer");
 
+const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
 router.post(
@@ -15,8 +17,16 @@ router.post(
 router.get(
   "/",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   Controller.getAll
+);
+
+router.post(
+  "/import-excel",
+  protect,
+  authorize("admin", "secretary"),
+  upload.single("file"),
+  Controller.importExcel
 );
 
 router.delete(

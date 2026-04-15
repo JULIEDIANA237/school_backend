@@ -131,10 +131,20 @@ const getAllClasses = async (schoolYearId) => {
   const query = { isActive: true };
   if (schoolYearId) query.schoolYearId = schoolYearId;
   
-  return await Class.find(query)
+  const classes = await Class.find(query)
     .populate("cycleId")
     .populate("schoolYearId")
-    .populate("principalTeacher", "firstName lastName");
+    .populate("principalTeacher", "firstName lastName")
+    .lean();
+
+  // Pour chaque classe, on compte les élèves
+  const classesWithStudents = await Promise.all(classes.map(async (c) => {
+    const studentCount = await Student.countDocuments({ class: c._id, isActive: true });
+    // On simule un tableau de la bonne longueur pour le frontend
+    return { ...c, students: new Array(studentCount).fill({}) };
+  }));
+
+  return classesWithStudents;
 };
 
 const getClassDetails = async (id) => {

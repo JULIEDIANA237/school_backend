@@ -37,10 +37,18 @@ const createStudent = async (data) => {
 
 // Modifier un élève
 const updateStudent = async (id, data) => {
-  const student = await Student.findById(id);
+  const student = await Student.findById(id).populate("parents");
   if (!student) throw new Error("Student not found");
 
-  Object.assign(student, data);
+  const { phone, ...rest } = data;
+
+  // Si un téléphone est fourni et qu'on a un parent lié
+  if (phone && student.parents && student.parents.length > 0) {
+    const parentId = student.parents[0]._id || student.parents[0];
+    await User.findByIdAndUpdate(parentId, { phone });
+  }
+
+  Object.assign(student, rest);
   return await student.save();
 };
 
@@ -48,6 +56,7 @@ const updateStudent = async (id, data) => {
 const getStudentsByClass = async (classId) => {
   return await Student.find({ class: classId, isActive: true })
     .populate("class")
+    .populate("parents", "firstName lastName phone")
     .sort({ lastName: 1 });
 };
 
@@ -98,10 +107,49 @@ const getStudentsByParent = async (parentId) => {
 const getAllStudents = async () => {
   return await Student.find({ isActive: true })
     .populate("class")
+    .populate("parents", "firstName lastName phone")
     .sort({ lastName: 1 });
 };
+const parseExcelDate = (val) => {
+  if (!val) return null;
+  
+  // If it's already a date object
+  if (val instanceof Date) return val;
 
-// Importer des élèves en masse depuis Excel
+  // Handle Excel date serial number (e.g. 38520)
+  if (typeof val === 'number') {
+    return new Date((val - 25569) * 86400 * 1000);
+  }
+
+  // Handle String format DD-MM-YYYY or DD/MM/YYYY
+  if (typeof val === 'string') {
+    const parts = val.split(/[-/]/);
+    if (parts.length === 3) {
+      const d = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1; // 0-indexed
+      const y = parseInt(parts[2], 10);
+      // Basic check for DD-MM-YYYY
+      if (y > 1000) {
+        return new Date(y, m, d);
+      }
+      // Or YYYY-MM-DD
+      const dy = parseInt(parts[0], 10);
+      if (dy > 1000) {
+        return new Date(dy, m, parseInt(parts[2], 10));
+      }
+    }
+  }
+
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Import des élèves depuis Excel
+ */
+/**
+ * Import des élèves depuis Excel
+ */
 const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId) => {
   const Class = require("../classes/class.model");
   const workbook = xlsx.read(fileBuffer, { type: "buffer" });
@@ -117,20 +165,44 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
 
   const defaultPassword = await bcrypt.hash("EduFlow@2025", 10);
 
+  // Helper pour trouver une valeur par patterns
+  const getVal = (row, patterns) => {
+    const keys = Object.keys(row);
+    const key = keys.find(k => {
+      const normalized = k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return patterns.some(p => normalized.includes(p));
+    });
+    return key ? row[key] : null;
+  };
+
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     try {
+      // Extraction robuste des champs
+      const valNom = getVal(row, ['nom']);
+      const valPrenom = getVal(row, ['prenom']);
+      const valClasse = getVal(row, ['classe']);
+      const valDateNais = getVal(row, ['date', 'naissance']);
+      const valLieuNais = getVal(row, ['lieu', 'naissance']);
+      const valRedoublant = getVal(row, ['redoublant']);
+      const valMatricule = getVal(row, ['matricule']);
+      
+      const valNomParent = getVal(row, ['nom parent', 'parent nom']);
+      const valPrenomParent = getVal(row, ['prenom parent', 'parent prenom']);
+      const valTelParent = getVal(row, ['telephone', 'tel', 'phone', 'portable', 'contact']);
+      const valEmailParent = getVal(row, ['email']);
+
       // 1. Déterminer la classe
       let targetClassId = defaultClassId;
-      if (row.Classe) {
+      if (valClasse) {
         const foundClass = await Class.findOne({ 
-          name: row.Classe, 
+          name: new RegExp(`^${valClasse.toString().trim()}$`, 'i'), 
           schoolYearId: schoolYearId 
         });
         if (foundClass) {
           targetClassId = foundClass._id;
         } else {
-          throw new Error(`Classe "${row.Classe}" non trouvée pour cette année scolaire.`);
+          throw new Error(`Classe "${valClasse}" non trouvée pour cette année scolaire.`);
         }
       }
 
@@ -140,49 +212,64 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
 
       // 2. Gestion du Parent
       let parentUser = null;
-      const parentEmail = row.EmailParent || (row.TelephoneParent ? `${row.TelephoneParent}@eduflow.local` : null);
+      const finalPhone = valTelParent ? valTelParent.toString().trim() : "";
+      const parentEmail = valEmailParent || (finalPhone ? `${finalPhone}@eduflow.local` : null);
       
-      if (parentEmail) {
-        parentUser = await User.findOne({ email: parentEmail });
+      if (parentEmail || finalPhone) {
+        // Find by email OR by phone
+        parentUser = await User.findOne({ 
+          $or: [
+            { email: parentEmail || "____never_match____" },
+            { phone: finalPhone || "____never_match____" }
+          ]
+        });
         
         if (!parentUser) {
           parentUser = await User.create({
-            email: parentEmail,
+            email: parentEmail || `${Date.now()}@eduflow.local`,
             password: defaultPassword,
-            firstName: row.PrenomParent || "Parent",
-            lastName: row.NomParent || row.Nom || "Inconnu",
+            firstName: valPrenomParent || "Parent",
+            lastName: valNomParent || valNom || "Inconnu",
+            phone: finalPhone,
             role: "parent"
           });
           result.parentsCreated++;
+        } else if (!parentUser.phone && finalPhone) {
+          parentUser.phone = finalPhone;
+          await parentUser.save();
         }
       }
 
       // 3. Gestion de l'Elève
-      // Vérifier doublon (Nom, Prénom, Date Naissance dans la même classe)
-      const dob = row.DateNaissance ? new Date(row.DateNaissance) : null;
+      const dob = parseExcelDate(valDateNais);
+      
+      if (valDateNais && !dob) {
+        result.errors.push(`Ligne ${i + 2}: Format de date invalide "${valDateNais}". Utilisez JJ-MM-AAAA.`);
+      }
+
       const existingStudent = await Student.findOne({
-        firstName: row.Prenom,
-        lastName: row.Nom,
+        firstName: valPrenom,
+        lastName: valNom,
         class: targetClassId,
         dateOfBirth: dob
       });
 
       if (existingStudent) {
-        result.errors.push(`Ligne ${i + 2}: L'élève ${row.Prenom} ${row.Nom} est déjà inscrit dans cette classe.`);
+        result.errors.push(`Ligne ${i + 2}: L'élève ${valPrenom} ${valNom} est déjà inscrit.`);
         continue;
       }
 
       const internalMatricule = await generateInternalMatricule();
 
       const studentData = {
-        firstName: row.Prenom || "Inconnu",
-        lastName: row.Nom || "Inconnu",
+        firstName: valPrenom || "Inconnu",
+        lastName: valNom || "Inconnu",
         matricule: internalMatricule,
-        matriculeMinesec: row.Matricule || null,
-        statusMinesec: row.Matricule ? 'VALIDE' : 'EN_ATTENTE',
+        matriculeMinesec: valMatricule || null,
+        statusMinesec: valMatricule ? 'VALIDE' : 'EN_ATTENTE',
         dateOfBirth: dob || new Date(new Date().getFullYear() - 10, 0, 1),
-        placeOfBirth: row.LieuNaissance || "",
-        isRepeating: row.Redoublant ? ['oui', 'yes', 'vrai', 'true', '1'].includes(row.Redoublant.toString().toLowerCase().trim()) : false,
+        placeOfBirth: valLieuNais || "",
+        isRepeating: valRedoublant ? ['oui', 'yes', 'vrai', 'true', '1'].includes(valRedoublant.toString().toLowerCase().trim()) : false,
         class: targetClassId,
         parents: parentUser ? [parentUser._id] : [],
         isActive: true

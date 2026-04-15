@@ -51,13 +51,24 @@ const importTeachersFromExcel = async (fileBuffer) => {
     errors: [],
   };
 
+  // Helper pour trouver une valeur par patterns
+  const getVal = (row, patterns) => {
+    const keys = Object.keys(row);
+    const key = keys.find(k => {
+      const normalized = k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return patterns.some(p => normalized.includes(p));
+    });
+    return key ? row[key] : null;
+  };
+
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     try {
-      const fName = row.firstName || row.Prenom || row.Prénom;
-      const lName = row.lastName || row.Nom;
-      const email = row.email || row.Email;
-      const password = row.password || row.Password || row.MotDePasse;
+      const fName = getVal(row, ['prenom']);
+      const lName = getVal(row, ['nom']);
+      const email = getVal(row, ['email']);
+      const phone = getVal(row, ['telephone', 'tel', 'phone', 'contact']);
+      const password = getVal(row, ['password', 'mot de passe']);
 
       if (!fName || !lName || !email) {
         // Skip empty rows
@@ -67,7 +78,11 @@ const importTeachersFromExcel = async (fileBuffer) => {
 
       const existingUser = await UserModel.findOne({ email });
       if (existingUser) {
-        // Update existing teacher if needed or skip
+        // Update existing teacher if needed (e.g. update phone)
+        if (!existingUser.phone && phone) {
+           existingUser.phone = phone;
+           await existingUser.save();
+        }
         result.errors.push(`Ligne ${i + 2}: L'utilisateur avec l'email ${email} existe déjà.`);
         continue;
       }
@@ -78,6 +93,7 @@ const importTeachersFromExcel = async (fileBuffer) => {
         firstName: fName,
         lastName: lName,
         email,
+        phone,
         password: hashedPassword,
         role: "teacher",
       });

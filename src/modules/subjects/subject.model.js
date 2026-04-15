@@ -14,6 +14,21 @@ const subjectSchema = new mongoose.Schema(
       unique: true,
       index: true // ex: MATH, PHY, FR
     },
+    principalTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+    cycle: {
+      type: String,
+      enum: ["Premier cycle", "Second cycle", "Tous"],
+      default: "Tous"
+    },
+    category: {
+      type: String,
+      enum: ["Littéraire", "Scientifique", "Complémentaire", "Autre"],
+      default: "Autre"
+    },
     isActive: {
       type: Boolean,
       default: true

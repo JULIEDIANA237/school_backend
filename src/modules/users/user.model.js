@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "teacher", "parent", "student", "secretary"],
       default: "parent",
     },
+    phone: { type: String, trim: true },
     settings: {
       notifications: {
         email: { type: Boolean, default: true },

@@ -5,12 +5,27 @@ const { authorize } = require("../../middlewares/role.middleware");
 
 const router = express.Router();
 
+// 🗂 Obtenir TOUTES les périodes
+router.get(
+  "/",
+  protect,
+  PeriodController.getAll
+);
+
 // ➕ Créer une période (admin)
 router.post(
   "/",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   PeriodController.create
+);
+
+// ✏️ Modifier une période (admin)
+router.put(
+  "/:periodId",
+  protect,
+  authorize("admin", "secretary"),
+  PeriodController.update
 );
 
 // 🔄 Activer une période (admin)
@@ -18,7 +33,7 @@ router.post(
 router.patch(
   "/activate",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   PeriodController.activate
 );
 
@@ -46,7 +61,7 @@ router.get(
 router.delete(
   "/:periodId",
   protect,
-  authorize("admin"),
+  authorize("admin", "secretary"),
   PeriodController.remove
 );
 

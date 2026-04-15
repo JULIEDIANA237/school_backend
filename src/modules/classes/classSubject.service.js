@@ -42,43 +42,57 @@ const importCoefficientsFromExcel = async (fileBuffer) => {
     errors: [],
   };
 
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i]; // class, subject, coefficient, year, group
-    try {
-      const { 
-        class: className, 
-        subject: subjectName, 
-        coefficient, 
-        year, 
-        group 
-      } = row;
+  // Charger toutes les données en amont pour optimiser
+  const currentYear = await SchoolYearService.getCurrent() || (await SchoolYearService.getAll())[0];
+  if (!currentYear) throw new Error("Aucune année scolaire active n'a été trouvée");
 
-      if (!className || !subjectName || !coefficient || !year) {
-        throw new Error("Champs requis manquants (class, subject, coefficient, year)");
+  const allClasses = await Class.find({});
+  const normalize = (str) => {
+    if (!str) return "";
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "").toLowerCase();
+  };
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    try {
+      const getVal = (rowObj, ...keys) => {
+        const rowKeys = Object.keys(rowObj);
+        const match = rowKeys.find(rk => keys.some(k => rk.toLowerCase().trim() === k.toLowerCase().trim()));
+        return match ? rowObj[match] : undefined;
+      };
+
+      const className = getVal(row, "classe", "class");
+      const subjectName = getVal(row, "matiere", "matière", "subject", "nom");
+      const coefficient = getVal(row, "coefficient", "coeff", "coef");
+      const groupInput = getVal(row, "groupe", "group");
+
+      if (!className || !subjectName || !coefficient) {
+        throw new Error("Champs requis manquants (Classe, Matière, Coefficient)");
       }
 
-      // 1. Trouver l'année scolaire
-      const schoolYear = await SchoolYearService.findOrCreate(year);
+      // 1. Trouver la classe (sans tenir compte des accents)
+      const normInput = normalize(className.toString());
+      const classe = allClasses.find(c => normalize(c.name) === normInput);
+      if (!classe) throw new Error(`Classe '${className}' non trouvée`);
 
-      // 2. Trouver la classe (pour cette année)
-      const classe = await Class.findOne({ name: className, schoolYearId: schoolYear._id });
-      if (!classe) throw new Error(`Classe '${className}' non trouvée pour l'année ${year}`);
-
-      // 3. Trouver la matière
+      // 2. Trouver la matière
       const subject = await Subject.findOne({ 
-        $or: [{ name: subjectName }, { code: subjectName.toUpperCase() }] 
+        $or: [
+          { name: { $regex: new RegExp(`^${subjectName.toString().trim()}$`, 'i') } },
+          { code: subjectName.toString().trim().toUpperCase() }
+        ]
       });
       if (!subject) throw new Error(`Matière '${subjectName}' non trouvée`);
 
-      // 4. Créer/Mettre à jour le coefficient
+      // 3. Créer/Mettre à jour le coefficient
       await ClassSubject.findOneAndUpdate(
-        { classId: classe._id, subjectId: subject._id, schoolYearId: schoolYear._id },
+        { classId: classe._id, subjectId: subject._id, schoolYearId: currentYear._id },
         {
           classId: classe._id,
           subjectId: subject._id,
-          schoolYearId: schoolYear._id,
+          schoolYearId: currentYear._id,
           coefficient: Number(coefficient),
-          group: group || 1,
+          group: groupInput ? Number(groupInput) : 1,
         },
         { upsert: true, new: true }
       );
