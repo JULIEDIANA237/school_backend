@@ -3,6 +3,11 @@ const Grade = require("../grades/grade.model");
 const Period = require("../periods/period.model");
 const { isTeacherAssigned } = require("../teachers/teacherAssignment.service");
 const notificationService = require("../notifications/notification.service");
+const User = require("../users/user.model");
+
+const countGrades = async (evaluationId) => {
+  return Grade.countDocuments({ evaluation: evaluationId });
+};
 
 /**
  * Création d'une évaluation
@@ -26,7 +31,11 @@ const createEvaluation = async (data) => {
     type: "SUCCESS"
   });
 
-  return evaluation;
+  const res = evaluation.toObject();
+  res.id = res._id;
+  res.gradesCount = 0;
+
+  return res;
 };
 
 /**
@@ -118,6 +127,7 @@ const updateEvaluation = async (evaluationId, teacherId, updates) => {
     maxScore: evaluation.maxScore,
     coefficient: evaluation.coefficient,
     isPublished: evaluation.isPublished,
+    gradesCount: await countGrades(evaluationId),
   };
 
   console.log("📤 Returning DTO:", dto);
@@ -130,10 +140,14 @@ const updateEvaluation = async (evaluationId, teacherId, updates) => {
  * Récupération des évaluations par classe (+ période optionnelle)
  */
 // evaluation.service.js
-const getEvaluationsByClass = async (classId, periodId) => {
+const getEvaluationsByClass = async (classId, periodId, teacherId) => {
   if (!classId) throw new Error("classId is required");
 
   let query = { class: classId };
+  if (teacherId) {
+    query.teacher = teacherId;
+  }
+  
   const Period = require("../periods/period.model");
 
   if (periodId) {
@@ -284,7 +298,11 @@ const publishEvaluation = async (evaluationId) => {
     type: "SUCCESS"
   });
 
-  return evaluation;
+  const res = evaluation.toObject();
+  res.id = res._id;
+  res.gradesCount = await countGrades(evaluationId);
+
+  return res;
 };
 
 const getGradesForEvaluation = async (evaluationId) => {
@@ -377,6 +395,7 @@ const unpublishEvaluation = async (evaluationId, teacherId) => {
     maxScore: updated.maxScore,
     coefficient: updated.coefficient,
     isPublished: updated.isPublished,
+    gradesCount: await countGrades(evaluationId),
   };
 };
 

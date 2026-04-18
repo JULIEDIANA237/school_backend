@@ -5,6 +5,14 @@ const { authorize } = require("../../middlewares/role.middleware");
 
 const router = express.Router();
 
+// lister tous les bulletins (admin/secrétaire)
+router.get(
+  "/",
+  protect,
+  authorize("admin", "secretary"),
+  BulletinController.getAll
+);
+
 // créer ou mettre à jour un bulletin
 router.post(
   "/",
@@ -27,6 +35,61 @@ router.patch(
   protect,
   authorize("teacher", "admin"),
   BulletinController.publish
+);
+
+// Récupérer un bulletin par ID
+router.get(
+  "/:bulletinId",
+  protect,
+  authorize("admin", "secretary", "teacher", "parent"),
+  BulletinController.getById
+);
+
+// Debug: inspecter les données pour une classe (admin seulement)
+router.get(
+  "/debug/:classId",
+  protect,
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const { classId } = req.params;
+      const ClassSubject = require("../classes/classSubject.model");
+      const Period = require("../periods/period.model");
+      const ClassModel = require("../classes/class.model");
+      const Bulletin = require("./bulletin.model");
+
+      const classDoc = await ClassModel.findById(classId).lean();
+      const classSubjectsWithYear = await ClassSubject.find({ classId, schoolYearId: classDoc?.schoolYearId })
+        .populate("subjectId", "name code")
+        .lean();
+      const classSubjectsAny = await ClassSubject.find({ classId })
+        .populate("subjectId", "name code")
+        .lean();
+      const periods = await Period.find({}).lean();
+      const bulletinCount = await Bulletin.countDocuments({ class: classId });
+      const sampleBulletin = await Bulletin.findOne({ class: classId }).lean();
+
+      res.json({
+        classDoc,
+        classSubjectsWithYear: classSubjectsWithYear.length,
+        classSubjectsAny: classSubjectsAny.length,
+        classSubjectsAnyList: classSubjectsAny.map(cs => ({ subject: cs.subjectId?.name, coef: cs.coefficient, schoolYearId: cs.schoolYearId })),
+        periods: periods.map(p => ({ id: p._id, name: p.name, type: p.type, parentPeriod: p.parentPeriod })),
+        bulletinCount,
+        sampleBulletinAveragesCount: sampleBulletin?.averages?.length
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// Génération groupée
+router.post(
+  "/generate",
+  protect,
+  authorize("admin", "secretary"),
+  BulletinController.generateForClass
 );
 
 // bulletins publiés pour parents

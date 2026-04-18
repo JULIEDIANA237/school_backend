@@ -2,6 +2,7 @@ const Student = require("./student.model");
 const Grade = require("../grades/grade.model");
 const Bulletin = require("../bulletins/bulletin.model");
 const User = require("../users/user.model");
+const SchoolYear = require("../schoolYear/schoolYear.model");
 const xlsx = require("xlsx");
 const bcrypt = require("bcryptjs");
 
@@ -163,6 +164,13 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
     errors: []
   };
 
+  // 🔹 Déterminer l'année scolaire de travail si non fournie
+  let finalYearId = schoolYearId;
+  if (!finalYearId) {
+    const activeYear = await SchoolYear.findOne({ isCurrent: true });
+    finalYearId = activeYear ? activeYear._id : (await SchoolYear.findOne().sort({ createdAt: -1 }))?._id;
+  }
+
   const defaultPassword = await bcrypt.hash("EduFlow@2025", 10);
 
   // Helper pour trouver une valeur par patterns
@@ -197,7 +205,7 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
       if (valClasse) {
         const foundClass = await Class.findOne({ 
           name: new RegExp(`^${valClasse.toString().trim()}$`, 'i'), 
-          schoolYearId: schoolYearId 
+          schoolYearId: finalYearId 
         });
         if (foundClass) {
           targetClassId = foundClass._id;

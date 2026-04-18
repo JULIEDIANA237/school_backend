@@ -176,8 +176,9 @@ const addTeacherToClass = async (classId, teacherId) => {
 };
 
 const getClassStudents = async (id) => {
-  const classe = await Class.findById(id).populate("students");
-  return classe ? classe.students : [];
+  return await Student.find({ class: id, isActive: true })
+    .populate("parents", "firstName lastName phone")
+    .sort({ lastName: 1 });
 };
 
 const getClassSubjects = async (id) => {

@@ -70,6 +70,7 @@ console.log("🟡 MONGO URI =", MONGO_URI.replace(/:\/\/.*@/, "://<hidden>@"));
 mongoose
   .connect(MONGO_URI, {
     serverSelectionTimeoutMS: 5000,
+    family: 4, // Force IPv4 to avoid some DNS/SSL issues with Atlas
   })
   .then(() => {
     console.log("🟢 MONGO - Connexion réussie");

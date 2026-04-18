@@ -1,4 +1,5 @@
 const Period = require("./period.model");
+const SchoolYear = require("../schoolYear/schoolYear.model");
 const Evaluation = require("../evaluations/evaluation.model");
 const Bulletin = require("../bulletins/bulletin.model");
 
@@ -24,8 +25,6 @@ const createPeriod = async (data) => {
   }
 
   // Vérifier chevauchement sur la même année ET LE MÊME TYPE
-  // On utilise des inégalités strictes pour permettre aux périodes de se "toucher"
-  // (ex: l'une finit le 01/06 et l'autre commence le 01/06)
   const overlap = await Period.findOne({
     year: data.year,
     type: data.type,
@@ -93,7 +92,6 @@ const toggleActivation = async (periodId) => {
   const newState = !period.isActive;
 
   if (newState) {
-    // Si on active, on désactive toutes les autres périodes (tous types confondus pour éviter les conflits de "période active")
     await Period.updateMany({}, { isActive: false });
   }
 
@@ -103,21 +101,26 @@ const toggleActivation = async (periodId) => {
   return period;
 };
 
-// 🔥 NOUVEAU : récupérer la période active globale
+// Récupérer la période active globale
 const getActivePeriod = async () => {
   const period = await Period.findOne({ isActive: true });
-
   if (!period) {
     throw new Error("No active period found");
   }
-
   return period;
 };
 
-// 🔥 NOUVEAU : récupérer l’année active
+// Récupérer l’année active
 const getActiveYear = async () => {
-  const period = await getActivePeriod();
-  return period.year;
+  try {
+    const period = await getActivePeriod();
+    return period.year;
+  } catch (e) {
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    if (!currentYear) throw new Error("No school year found");
+    return currentYear.name;
+  }
 };
 
 // Liste des périodes par année
@@ -140,11 +143,29 @@ const deletePeriod = async (periodId) => {
 };
 
 const getPeriodsByActiveYear = async () => {
-  const activePeriod = await getActivePeriod();
-  return await getPeriodsByYear(activePeriod.year);
+  let year = null;
+  
+  // 1. Essayer de trouver une période active
+  try {
+    const activePeriod = await Period.findOne({ isActive: true });
+    if (activePeriod) year = activePeriod.year;
+  } catch (e) {}
+
+  // 2. Fallback sur l'année scolaire marquée "isCurrent"
+  if (!year) {
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) {
+      currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    }
+    if (currentYear) year = currentYear.name;
+  }
+
+  if (!year) return [];
+
+  return await getPeriodsByYear(year);
 };
 
-// 🔥 NOUVEAU : récupérer toutes les périodes confondues
+// Récupérer toutes les périodes confondues
 const getAllPeriods = async () => {
   return await Period.find().sort({ year: -1, startDate: 1 });
 };

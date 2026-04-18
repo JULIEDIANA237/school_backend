@@ -30,6 +30,59 @@ const TeacherAssignmentService = {
     return await TeacherAssignment.findByIdAndDelete(id);
   },
 
+  async getTeacherClasses(teacherId) {
+    const Student = require("../students/student.model");
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    
+    const assignments = await TeacherAssignment.find({ 
+      teacherId, 
+      schoolYearId: currentYear?._id,
+      isActive: true 
+    })
+    .populate("classId")
+    .populate("subjectId");
+
+    // Mapper pour correspondre aux attentes du frontend (classId -> class, subjectId -> subject)
+    // Et s'assurer que le nombre d'élèves est précis
+    return await Promise.all(assignments.map(async (a) => {
+      const obj = a.toObject();
+      const studentsCount = await Student.countDocuments({ class: obj.classId?._id, isActive: true });
+      
+      return {
+        ...obj,
+        class: {
+          ...obj.classId,
+          students: { length: studentsCount } // Pour compatibilité avec item.class?.students?.length
+        },
+        subject: obj.subjectId,
+        studentsCount // Pour compatibilité avec cls.studentsCount
+      };
+    }));
+  },
+
+  async getClassSubjects(classId) {
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+
+    const assignments = await TeacherAssignment.find({ 
+      classId, 
+      schoolYearId: currentYear?._id,
+      isActive: true 
+    })
+    .populate("teacherId", "firstName lastName")
+    .populate("subjectId");
+
+    return assignments.map(a => {
+      const obj = a.toObject();
+      return {
+        ...obj,
+        subject: obj.subjectId,
+        teacher: obj.teacherId
+      };
+    });
+  },
+
   /**
    * Import des attributions depuis Excel
    * Colonnes : Classe, Matière, Professeur
@@ -145,6 +198,21 @@ const TeacherAssignmentService = {
     }
 
     return result;
+  },
+
+  async isTeacherAssigned(teacherId, classId, subjectId) {
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+
+    const assignment = await TeacherAssignment.findOne({
+      teacherId,
+      classId,
+      subjectId,
+      schoolYearId: currentYear?._id,
+      isActive: true
+    });
+
+    return !!assignment;
   }
 };
 

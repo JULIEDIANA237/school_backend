@@ -49,12 +49,15 @@ const listEvaluations = async (req, res) => {
 
     const { classId } = req.params;
     const { periodId } = req.query;
+    
+    const teacherId = req.user && req.user.role === "teacher" ? req.user.id : undefined;
 
     console.log("🧪 classId =", classId);
     console.log("🧪 periodId =", periodId);
+    console.log("🧪 teacherId =", teacherId);
 
     const evaluations =
-      await evalService.getEvaluationsByClass(classId, periodId);
+      await evalService.getEvaluationsByClass(classId, periodId, teacherId);
 
     res.json({ data: evaluations });
   } catch (error) {
