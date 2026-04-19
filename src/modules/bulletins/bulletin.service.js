@@ -4,6 +4,7 @@ const Evaluation = require("../evaluations/evaluation.model");
 const Student = require("../students/student.model");
 const Period = require("../periods/period.model");
 const ClassSubject = require("../classes/classSubject.model");
+const Assignment = require("../assignments/assignment.model");
 
 /**
  * Récupère les matières assignées à une classe.
@@ -211,8 +212,16 @@ const getAllBulletins = async (periodId, classId) => {
 
 const getBulletinById = async (bulletinId) => {
   const bulletin = await Bulletin.findById(bulletinId)
-    .populate("student", "firstName lastName matricule photo")
-    .populate("class", "name level")
+    .populate({
+      path: "student",
+      select: "firstName lastName matricule matriculeMinesec photo dateOfBirth placeOfBirth gender isRepeating parents",
+      populate: { path: "parents", select: "firstName lastName phone" }
+    })
+    .populate({
+      path: "class",
+      select: "name level principalTeacher",
+      populate: { path: "principalTeacher", select: "firstName lastName" }
+    })
     .populate("period", "name type isActive parentPeriod")
     .populate("averages.subject", "name code coefficient group")
     .lean();
@@ -232,6 +241,93 @@ const getBulletinById = async (bulletinId) => {
       bulletin.childBulletins = seqBulletins;
     }
   }
+
+  // Calcul du profil de la classe
+  const classBulletins = await Bulletin.find({ class: bulletin.class?._id, period: bulletin.period?._id }).lean();
+  let maxAverage = 0;
+  let minAverage = 20;
+  let sumAverage = 0;
+  let admittedCount = 0;
+
+  classBulletins.forEach(b => {
+    const avg = b.generalAverage || 0;
+    if (avg > maxAverage) maxAverage = avg;
+    if (avg < minAverage) minAverage = avg;
+    sumAverage += avg;
+    if (avg >= 10) admittedCount++;
+  });
+
+  if (classBulletins.length === 0) {
+    minAverage = 0;
+  }
+
+  bulletin.classProfile = {
+    maxAverage: parseFloat(maxAverage.toFixed(2)),
+    minAverage: parseFloat(minAverage.toFixed(2)),
+    classAverage: classBulletins.length > 0 ? parseFloat((sumAverage / classBulletins.length).toFixed(2)) : 0,
+    totalStudents: classBulletins.length,
+    admittedCount: admittedCount,
+    successRate: classBulletins.length > 0 ? parseFloat(((admittedCount / classBulletins.length) * 100).toFixed(2)) : 0
+  };
+
+  // Calcul Rangs et Stats par matière
+  const subjectStats = {};
+  const subjectGrades = {}; 
+  
+  classBulletins.forEach(cb => {
+    (cb.averages || []).forEach(a => {
+       const sid = a.subject?.toString();
+       if (!sid) return;
+       if (!subjectStats[sid]) subjectStats[sid] = { sum: 0, count: 0, min: 20, max: 0 };
+       if (!subjectGrades[sid]) subjectGrades[sid] = [];
+       
+       subjectStats[sid].sum += a.average;
+       subjectStats[sid].count++;
+       if (a.average > subjectStats[sid].max) subjectStats[sid].max = a.average;
+       if (a.average < subjectStats[sid].min) subjectStats[sid].min = a.average;
+
+       subjectGrades[sid].push({ studentId: cb.student?.toString(), average: a.average });
+    });
+  });
+
+  Object.keys(subjectStats).forEach(sid => {
+     subjectStats[sid].classAverage = parseFloat((subjectStats[sid].sum / subjectStats[sid].count).toFixed(2));
+     subjectGrades[sid].sort((x, y) => y.average - x.average);
+  });
+
+  const curStudentId = bulletin.student?._id?.toString() || bulletin.student?.toString();
+  const classId = bulletin.class?._id?.toString() || bulletin.class?.toString();
+
+  // Récupérer les professeurs via les évaluations de la classe
+  const evals = await Evaluation.find({ class: classId })
+    .populate("teacher", "firstName lastName")
+    .lean();
+  
+  const teacherMap = {};
+  evals.forEach(ev => {
+    if (ev.subject && ev.teacher) {
+      teacherMap[ev.subject.toString()] = `${ev.teacher.lastName} ${ev.teacher.firstName}`;
+    }
+  });
+
+  bulletin.averages = (bulletin.averages || []).map(a => {
+     const sid = a.subject?._id?.toString() || a.subject?.toString();
+     if (!sid) return a;
+     const stats = subjectStats[sid] || {};
+     const gradesList = subjectGrades[sid] || [];
+     const idx = gradesList.findIndex(x => x.studentId === curStudentId);
+     const rank = idx !== -1 ? idx + 1 : 0;
+     
+     return {
+        ...a,
+        min: stats.min !== 20 ? stats.min : 0,
+        max: stats.max !== 0 ? stats.max : 0,
+        classAverage: stats.classAverage || 0,
+        rank: rank,
+        teacherName: teacherMap[sid] || "Non assigné"
+     };
+  });
+
   return bulletin;
 };
 

@@ -194,6 +194,7 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
       const valLieuNais = getVal(row, ['lieu', 'naissance']);
       const valRedoublant = getVal(row, ['redoublant']);
       const valMatricule = getVal(row, ['matricule']);
+      const valSexe = getVal(row, ['sexe', 'genre', 'gender']);
       
       const valNomParent = getVal(row, ['nom parent', 'parent nom']);
       const valPrenomParent = getVal(row, ['prenom parent', 'parent prenom']);
@@ -269,6 +270,13 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
 
       const internalMatricule = await generateInternalMatricule();
 
+      let genderCode = null;
+      if (valSexe) {
+         const strVal = valSexe.toString().trim().toUpperCase();
+         if (['M', 'MASCULIN', 'MALE', 'GARÇON', 'GARCON', 'BOY'].includes(strVal)) genderCode = 'M';
+         else if (['F', 'FEMININ', 'FEMALE', 'FILLE', 'GIRL'].includes(strVal)) genderCode = 'F';
+      }
+
       const studentData = {
         firstName: valPrenom || "Inconnu",
         lastName: valNom || "Inconnu",
@@ -277,6 +285,7 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
         statusMinesec: valMatricule ? 'VALIDE' : 'EN_ATTENTE',
         dateOfBirth: dob || new Date(new Date().getFullYear() - 10, 0, 1),
         placeOfBirth: valLieuNais || "",
+        gender: genderCode,
         isRepeating: valRedoublant ? ['oui', 'yes', 'vrai', 'true', '1'].includes(valRedoublant.toString().toLowerCase().trim()) : false,
         class: targetClassId,
         parents: parentUser ? [parentUser._id] : [],

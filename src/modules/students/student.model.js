@@ -21,6 +21,7 @@ const studentSchema = new mongoose.Schema(
 
     dateOfBirth: { type: Date, required: true },
     placeOfBirth: { type: String, trim: true },
+    gender: { type: String, enum: ['M', 'F'], required: false },
     isRepeating: { type: Boolean, default: false },
 
     class: {

@@ -111,6 +111,7 @@ const BulletinController = {
         matricule: bulletin.student?.matricule,
         photo: bulletin.student?.photo,
         className: bulletin.class?.name,
+        principalTeacher: bulletin.class?.principalTeacher,
         periodName: bulletin.period?.name,
         periodType: bulletin.period?.type,
         year: "2024-2025",
@@ -123,7 +124,13 @@ const BulletinController = {
             subject: sid,
             subjectName: a.subject?.name,
             coefficient: a.coefficient,
+            group: a.group || a.subject?.group || 1,
             average: a.average,
+            min: a.min,
+            max: a.max,
+            rank: a.rank,
+            classAverage: a.classAverage,
+            teacherName: a.teacherName,
             sequenceMarks: sequenceMarks[sid] || {},
             appreciation:
               a.average >= 16 ? "Très Bien" :
@@ -219,6 +226,27 @@ const BulletinController = {
     } catch (error) {
       console.error("❌ Erreur generateForClass:", error);
       res.status(500).json({ error: "Erreur: " + error.message });
+    }
+  },
+  // Mettre à jour les détails du bulletin (commentaires, décisions)
+  async updateDetails(req, res) {
+    try {
+      const { bulletinId } = req.params;
+      const { teacherComment, decisions } = req.body;
+      const Bulletin = require("./bulletin.model");
+      
+      const bulletin = await Bulletin.findByIdAndUpdate(
+        bulletinId,
+        { teacherComment, decisions },
+        { new: true }
+      );
+      
+      if (!bulletin) return res.status(404).json({ error: "Bulletin introuvable" });
+      
+      res.status(200).json({ message: "Détails mis à jour", data: bulletin });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erreur lors de la mise à jour du bulletin" });
     }
   }
 };

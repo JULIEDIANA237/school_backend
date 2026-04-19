@@ -22,6 +22,7 @@ const bulletinSchema = new Schema(
     rank: Number,
     teacherComment: String,
     principalComment: String,
+    decisions: [String], // Pour stocker les cases cochées
     isPublished: { type: Boolean, default: false }
   },
   { timestamps: true }

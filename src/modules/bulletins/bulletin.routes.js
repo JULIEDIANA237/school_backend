@@ -45,6 +45,14 @@ router.get(
   BulletinController.getById
 );
 
+// Mettre à jour les détails (commentaires, décisions)
+router.patch(
+  "/:bulletinId",
+  protect,
+  authorize("teacher", "admin"),
+  BulletinController.updateDetails
+);
+
 // Debug: inspecter les données pour une classe (admin seulement)
 router.get(
   "/debug/:classId",
