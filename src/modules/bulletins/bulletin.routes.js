@@ -17,7 +17,7 @@ router.get(
 router.post(
   "/",
   protect,
-  authorize("teacher", "admin"),
+  authorize("teacher", "admin", "secretary"),
   BulletinController.createOrUpdate
 );
 
@@ -25,7 +25,7 @@ router.post(
 router.get(
   "/class/:classId/period/:periodId",
   protect,
-  authorize("teacher", "admin"),
+  authorize("teacher", "admin", "secretary"),
   BulletinController.getByClass
 );
 
@@ -57,7 +57,7 @@ router.get(
 router.patch(
   "/:bulletinId",
   protect,
-  authorize("teacher", "admin"),
+  authorize("teacher", "admin", "secretary"),
   BulletinController.updateDetails
 );
 

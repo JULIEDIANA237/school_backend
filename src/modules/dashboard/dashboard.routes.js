@@ -5,7 +5,7 @@ const controller = require("./dashboard.controller");
 
 const router = express.Router();
 
-router.get("/stats", protect, authorize("admin"), controller.getAdminStats);
-router.get("/available-years", protect, authorize("admin"), controller.getAvailableYears);
+router.get("/stats", protect, authorize("admin", "secretary"), controller.getAdminStats);
+router.get("/available-years", protect, authorize("admin", "secretary"), controller.getAvailableYears);
 
 module.exports = router;
