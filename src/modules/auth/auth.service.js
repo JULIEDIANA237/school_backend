@@ -1,4 +1,4 @@
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../users/user.model");
 
@@ -8,7 +8,12 @@ const User = require("../users/user.model");
  */
 const register = async (data) => {
   // Vérifier si l'utilisateur existe déjà
-  const exists = await User.findOne({ email: data.email });
+  const exists = await User.findOne({ 
+    $or: [
+      { email: data.email.toLowerCase() },
+      { phone: data.phone }
+    ]
+  });
   if (exists) throw new Error("User already exists");
 
   // Hash du mot de passe
@@ -16,11 +21,12 @@ const register = async (data) => {
 
   // Création de l'utilisateur
   const user = await User.create({
-    email: data.email,
+    email: data.email.toLowerCase(),
     firstName: data.firstName || "",
     lastName: data.lastName || "",
     password: hashedPassword,
     role: data.role || "parent",
+    phone: data.phone
   });
 
   // Retourner l'utilisateur sans le mot de passe
@@ -30,11 +36,17 @@ const register = async (data) => {
 
 /**
  * Connexion d'un utilisateur
- * @param {string} email
+ * @param {string} identifier (email or phone)
  * @param {string} password
  */
-const login = async (email, password) => {
-  const user = await User.findOne({ email });
+const login = async (identifier, password) => {
+  const user = await User.findOne({
+    $or: [
+      { email: identifier.toLowerCase() },
+      { phone: identifier }
+    ]
+  });
+  
   if (!user) throw new Error("Invalid credentials");
 
   // Vérifier le mot de passe

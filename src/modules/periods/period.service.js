@@ -73,10 +73,16 @@ const activatePeriod = async (periodId) => {
     throw new Error("Period not found");
   }
 
+  // Désactiver seulement les périodes du même type pour cette année
   await Period.updateMany(
-    { year: period.year },
+    { year: period.year, type: period.type },
     { isActive: false }
   );
+
+  // Si c'est une SÉQUENCE et qu'elle a un parent, s'assurer que le parent est actif aussi
+  if (period.type === "SEQUENCE" && period.parentPeriod) {
+    await Period.findByIdAndUpdate(period.parentPeriod, { isActive: true });
+  }
 
   period.isActive = true;
   await period.save();
@@ -92,7 +98,16 @@ const toggleActivation = async (periodId) => {
   const newState = !period.isActive;
 
   if (newState) {
-    await Period.updateMany({}, { isActive: false });
+    // Désactiver seulement les périodes du même type
+    await Period.updateMany(
+      { year: period.year, type: period.type }, 
+      { isActive: false }
+    );
+    
+    // Si c'est une SÉQUENCE et qu'elle a un parent, auto-activer le parent
+    if (period.type === "SEQUENCE" && period.parentPeriod) {
+      await Period.findByIdAndUpdate(period.parentPeriod, { isActive: true });
+    }
   }
 
   period.isActive = newState;

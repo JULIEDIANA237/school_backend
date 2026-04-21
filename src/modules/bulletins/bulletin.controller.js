@@ -48,7 +48,17 @@ const BulletinController = {
       const parentId = req.user.id;
       const { periodId } = req.query;
       const bulletins = await BulletinService.getPublishedByParent(parentId, periodId);
-      res.status(200).json(bulletins);
+      const mapped = bulletins.map(b => ({
+        ...b,
+        studentName: b.student ? `${b.student.lastName.toUpperCase()} ${b.student.firstName}` : "Inconnu",
+        className: b.class?.name,
+        periodName: b.period?.name,
+        year: b.period?.year || "N/A",
+        average: b.generalAverage || 0,
+        rank: b.rank || 0,
+        status: "PUBLISHED"
+      }));
+      res.status(200).json(mapped);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Erreur lors de la récupération des bulletins publiés" });
@@ -68,7 +78,7 @@ const BulletinController = {
         period: b.period?._id,
         periodName: b.period ? b.period.name : "Période inconnue",
         periodType: b.period ? b.period.type : null,
-        year: "2024-2025",
+        year: b.period?.year || "N/A",
         average: b.generalAverage || 0,
         rank: b.rank || 0,
         status: b.isPublished ? "PUBLISHED" : "DRAFT"
@@ -114,7 +124,7 @@ const BulletinController = {
         principalTeacher: bulletin.class?.principalTeacher,
         periodName: bulletin.period?.name,
         periodType: bulletin.period?.type,
-        year: "2024-2025",
+        year: bulletin.period?.year || "N/A",
         average: bulletin.generalAverage || 0,
         rank: bulletin.rank || 0,
         status: bulletin.isPublished ? "PUBLISHED" : "DRAFT",
@@ -247,6 +257,48 @@ const BulletinController = {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Erreur lors de la mise à jour du bulletin" });
+    }
+  },
+  // Publication groupée
+  async bulkPublish(req, res) {
+    try {
+      const { classId, periodId } = req.body;
+      if (!classId || !periodId) {
+        return res.status(400).json({ error: "classId et periodId sont requis." });
+      }
+
+      const count = await BulletinService.bulkPublishBulletins(classId, periodId);
+      res.status(200).json({ message: `${count} bulletins publiés avec succès.` });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erreur lors de la publication groupée" });
+    }
+  },
+
+  // Dépublier un bulletin
+  async unpublish(req, res) {
+    try {
+      const { bulletinId } = req.params;
+      const bulletin = await BulletinService.unpublishBulletin(bulletinId);
+      res.status(200).json({ message: "Bulletin dépublié", data: bulletin });
+    } catch (error) {
+      res.status(500).json({ error: "Erreur lors de la dépublication du bulletin" });
+    }
+  },
+
+  // Dépublication groupée
+  async bulkUnpublish(req, res) {
+    try {
+      const { classId, periodId } = req.body;
+      if (!classId || !periodId) {
+        return res.status(400).json({ error: "classId et periodId sont requis." });
+      }
+
+      const count = await BulletinService.bulkUnpublishBulletins(classId, periodId);
+      res.status(200).json({ message: `${count} bulletins dépubliés avec succès.` });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erreur lors de la dépublication groupée" });
     }
   }
 };

@@ -154,10 +154,26 @@ const calculateBulletin = async (studentId, classId, periodId) => {
 };
 
 const publishBulletin = async (bulletinId) => {
-  const bulletin = await Bulletin.findById(bulletinId);
+  const NotificationService = require("../notifications/notification.service");
+  
+  const bulletin = await Bulletin.findById(bulletinId)
+    .populate({
+      path: "student",
+      populate: { path: "parents" }
+    })
+    .populate("period", "name type year")
+    .populate("class");
+
   if (!bulletin) throw new Error("Bulletin not found");
+  
   bulletin.isPublished = true;
   await bulletin.save();
+
+  // Déclencher les notifications asynchrones
+  NotificationService.notifyBulletinPublication(bulletin).catch(err => {
+    console.error("   ❌ Erreur notifications publication:", err.message);
+  });
+
   return bulletin;
 };
 
@@ -170,14 +186,16 @@ const getBulletinsByClass = async (classId, periodId) => {
 };
 
 const getPublishedByParent = async (parentId, periodId = null) => {
+  const mongoose = require("mongoose");
   const StudentModel = require("../students/student.model");
-  const childrenDocs = await StudentModel.find({ parent: parentId });
+  const childrenDocs = await StudentModel.find({ parents: new mongoose.Types.ObjectId(parentId) });
   const childrenIds = childrenDocs.map(c => c._id);
   const query = { student: { $in: childrenIds }, isPublished: true };
   if (periodId) query.period = periodId;
   return Bulletin.find(query)
     .populate("student", "firstName lastName")
     .populate("class", "name level")
+    .populate("period", "name type year")
     .populate("averages.subject", "name code coefficient")
     .sort({ generalAverage: -1 })
     .lean();
@@ -204,7 +222,7 @@ const getAllBulletins = async (periodId, classId) => {
   const bulletins = await Bulletin.find(query)
     .populate("student", "firstName lastName matricule photo")
     .populate("class", "name level")
-    .populate("period", "name type isActive")
+    .populate("period", "name type year isActive")
     .sort({ generalAverage: -1 })
     .lean();
   return bulletins.filter(b => b.student);
@@ -222,7 +240,7 @@ const getBulletinById = async (bulletinId) => {
       select: "name level principalTeacher",
       populate: { path: "principalTeacher", select: "firstName lastName" }
     })
-    .populate("period", "name type isActive parentPeriod")
+    .populate("period", "name type year isActive parentPeriod")
     .populate("averages.subject", "name code coefficient group")
     .lean();
   if (!bulletin) return null;
@@ -331,12 +349,47 @@ const getBulletinById = async (bulletinId) => {
   return bulletin;
 };
 
+const unpublishBulletin = async (bulletinId) => {
+  const bulletin = await Bulletin.findById(bulletinId);
+  if (!bulletin) throw new Error("Bulletin not found");
+  
+  bulletin.isPublished = false;
+  await bulletin.save();
+
+  return bulletin;
+};
+
+const bulkPublishBulletins = async (classId, periodId) => {
+  const bulletins = await Bulletin.find({ class: classId, period: periodId, isPublished: { $ne: true } });
+  let count = 0;
+  for (const b of bulletins) {
+    try {
+      await publishBulletin(b._id);
+      count++;
+    } catch (err) {
+      console.error(`   ❌ Échec publication bulk pour ${b._id}:`, err.message);
+    }
+  }
+  return count;
+};
+
+const bulkUnpublishBulletins = async (classId, periodId) => {
+  const result = await Bulletin.updateMany(
+    { class: classId, period: periodId },
+    { isPublished: false }
+  );
+  return result.modifiedCount;
+};
+
 module.exports = {
   calculateBulletin,
   publishBulletin,
+  unpublishBulletin,
   getBulletinsByClass,
   getPublishedByParent,
   calculateRanksForClass,
   getAllBulletins,
-  getBulletinById
+  getBulletinById,
+  bulkPublishBulletins,
+  bulkUnpublishBulletins
 };

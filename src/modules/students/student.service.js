@@ -222,7 +222,8 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
       // 2. Gestion du Parent
       let parentUser = null;
       const finalPhone = valTelParent ? valTelParent.toString().trim() : "";
-      const parentEmail = valEmailParent || (finalPhone ? `${finalPhone}@eduflow.local` : null);
+      const rawEmail = valEmailParent ? valEmailParent.toString().trim().toLowerCase() : "";
+      const parentEmail = rawEmail || (finalPhone ? `${finalPhone}@eduflow.local` : "");
       
       if (parentEmail || finalPhone) {
         // Find by email OR by phone

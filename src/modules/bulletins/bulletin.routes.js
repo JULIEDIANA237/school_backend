@@ -31,10 +31,18 @@ router.get(
 
 // publier un bulletin
 router.patch(
-  "/publish/:bulletinId",
+  "/:bulletinId/publish",
   protect,
-  authorize("teacher", "admin"),
+  authorize("teacher", "admin", "secretary"),
   BulletinController.publish
+);
+
+// bulletins publiés pour parents
+router.get(
+  "/parent",
+  protect,
+  authorize("parent"),
+  BulletinController.getPublishedForParent
 );
 
 // Récupérer un bulletin par ID
@@ -100,13 +108,30 @@ router.post(
   BulletinController.generateForClass
 );
 
-// bulletins publiés pour parents
-router.get(
-  "/parent",
+// Publication groupée
+router.post(
+  "/bulk-publish",
   protect,
-  authorize("parent"),
-  BulletinController.getPublishedForParent
+  authorize("admin", "teacher", "secretary"),
+  BulletinController.bulkPublish
 );
+
+// Dépublier un bulletin
+router.patch(
+  "/:bulletinId/unpublish",
+  protect,
+  authorize("admin", "secretary"),
+  BulletinController.unpublish
+);
+
+// Dépublication groupée
+router.post(
+  "/bulk-unpublish",
+  protect,
+  authorize("admin", "secretary"),
+  BulletinController.bulkUnpublish
+);
+
 
 
 module.exports = router;
