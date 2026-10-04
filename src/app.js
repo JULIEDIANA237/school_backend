@@ -57,6 +57,13 @@ app.use(async (req, res, next) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "School backend API is running",
+  });
+});
+
 app.use("/api/auth", authRoutes);
 
 // API CLASSES
