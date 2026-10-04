@@ -19,8 +19,43 @@ const schoolYearRoutes = require("./modules/schoolYear/schoolYear.routes");
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:8080",
+    credentials: true,
+  })
+);
 app.use(express.json());
+
+let connectionPromise;
+
+app.use(async (req, res, next) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      if (!process.env.MONGO_URI) {
+        throw new Error("MONGO_URI environment variable is required");
+      }
+
+      if (!connectionPromise) {
+        connectionPromise = mongoose
+          .connect(process.env.MONGO_URI, {
+            serverSelectionTimeoutMS: 5000,
+            family: 4,
+          })
+          .finally(() => {
+            connectionPromise = undefined;
+          });
+      }
+
+      await connectionPromise;
+    }
+
+    next();
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+    res.status(503).json({ message: "Database unavailable" });
+  }
+});
 
 app.use("/api/auth", authRoutes);
 
@@ -61,26 +96,5 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/cycles", cycleRoutes);
 app.use("/api/class-subjects", classSubjectRoutes);
 app.use("/api/school-years", schoolYearRoutes);
-
-const MONGO_URI = "mongodb+srv://Julie237:Module237@cluster0.e256eth.mongodb.net/school_api?appName=Cluster0";
-
-console.log("🟡 MONGO - Tentative de connexion...");
-console.log("🟡 MONGO URI =", MONGO_URI.replace(/:\/\/.*@/, "://<hidden>@"));
-
-mongoose
-  .connect(MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-    family: 4, // Force IPv4 to avoid some DNS/SSL issues with Atlas
-  })
-  .then(() => {
-    console.log("🟢 MONGO - Connexion réussie");
-  })
-  .catch((err) => {
-    console.error("🔴 MONGO - Connexion échouée");
-    console.error("🔴 NAME:", err.name);
-    console.error("🔴 MESSAGE:", err.message);
-    console.error("🔴 STACK:", err.stack);
-    process.exit(1);
-  });
 
 module.exports = app;

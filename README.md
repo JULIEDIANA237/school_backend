@@ -47,6 +47,43 @@ TWILIO_AUTH_TOKEN=votre_token_auth_twilio
 TWILIO_FROM_NUMBER=votre_numero_twilio
 ```
 
+Ne publiez jamais le fichier `.env` ni les valeurs réelles de ces variables. Si des identifiants ou une URI MongoDB ont déjà été poussés sur GitHub, remplacez-les (notamment le mot de passe MongoDB) et retirez les secrets du dépôt et de son historique.
+
+---
+
+## ☁️ Déploiement sur Vercel
+
+L'API est exposée à Vercel par `api/index.js`, qui exporte l'application Express sans démarrer de serveur avec `app.listen()`. Le fichier `vercel.json` redirige les requêtes vers cette fonction.
+
+### 1. Préparer MongoDB
+
+Configurez une base MongoDB Atlas accessible depuis Vercel et récupérez son URI de connexion. L'application lit l'URI depuis `MONGO_URI` et établit la connexion à la base à la demande.
+
+### 2. Importer le projet
+
+1. Poussez le projet sur GitHub sans inclure `.env`.
+2. Dans Vercel, choisissez **Add New → Project**, puis importez le dépôt.
+3. Pour ce dépôt backend seul, utilisez la racine du dépôt comme **Root Directory**.
+4. Laissez Vercel détecter le projet Node.js et installer les dépendances depuis `package-lock.json`.
+
+### 3. Ajouter les variables d'environnement
+
+Dans **Project → Settings → Environment Variables**, ajoutez au minimum :
+
+| Variable | Valeur |
+| --- | --- |
+| `MONGO_URI` | URI de connexion MongoDB Atlas |
+| `JWT_SECRET` | Secret JWT long, aléatoire et privé |
+| `FRONTEND_URL` | Origine de l'application frontend, par exemple `https://mon-frontend.vercel.app` |
+
+Ajoutez aussi les variables `MAIL_*` et `TWILIO_*` si les fonctionnalités email ou SMS sont utilisées. Après toute modification des variables, redéployez le projet pour les appliquer.
+
+### 4. Déployer et vérifier
+
+Cliquez sur **Deploy**, puis testez une route de l'API avec son URL Vercel, par exemple `https://mon-api.vercel.app/api/auth`. Les logs d'exécution sont disponibles dans l'onglet **Deployments → Functions**.
+
+Vercel exécute le backend sous forme de fonctions serverless : il ne faut pas appeler `app.listen()` dans le point d'entrée `api/index.js`. Pour des tâches longues ou exécutées en continu, utilisez plutôt un hébergeur qui fournit un serveur persistant.
+
 ---
 
 ## 🗄️ Structure de la Base de Données

@@ -1,5 +1,13 @@
 require("dotenv").config();
 const app = require("./app");
+const cors = require("cors");
+
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL,
+    credentials: true,
+  })
+);
 /*const connectDB = require("./config/database");
 
 connectDB();*/
