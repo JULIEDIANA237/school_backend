@@ -8,10 +8,14 @@ const userSchema = new mongoose.Schema(
     lastName: { type: String, required: true },
     role: {
       type: String,
+      lowercase: true,
+      trim: true,
       enum: ["admin", "teacher", "parent", "student", "secretary"],
-      default: "parent",
+      required: true,
     },
     phone: { type: String, trim: true },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
     settings: {
       notifications: {
         email: { type: Boolean, default: true },

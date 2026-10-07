@@ -30,10 +30,16 @@ const TeacherAssignmentService = {
     return await TeacherAssignment.findByIdAndDelete(id);
   },
 
-  async getTeacherClasses(teacherId) {
+  async getTeacherClasses(teacherId, schoolYearId) {
     const Student = require("../students/student.model");
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    let currentYear;
+    if (schoolYearId) {
+      currentYear = await SchoolYear.findById(schoolYearId);
+    } else {
+      currentYear = await SchoolYear.findOne({ isCurrent: true });
+      if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    }
+    if (!currentYear) return [];
     
     const assignments = await TeacherAssignment.find({ 
       teacherId, 
@@ -61,15 +67,18 @@ const TeacherAssignmentService = {
     }));
   },
 
-  async getClassSubjects(classId) {
+  async getClassSubjects(classId, teacherId = null) {
     let currentYear = await SchoolYear.findOne({ isCurrent: true });
     if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
 
-    const assignments = await TeacherAssignment.find({ 
+    const query = {
       classId, 
       schoolYearId: currentYear?._id,
       isActive: true 
-    })
+    };
+    if (teacherId) query.teacherId = teacherId;
+
+    const assignments = await TeacherAssignment.find(query)
     .populate("teacherId", "firstName lastName")
     .populate("subjectId");
 
@@ -213,6 +222,19 @@ const TeacherAssignmentService = {
     });
 
     return !!assignment;
+  },
+
+  async isTeacherAssignedToClass(teacherId, classId) {
+    let currentYear = await SchoolYear.findOne({ isCurrent: true });
+    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    if (!currentYear) return false;
+
+    return !!(await TeacherAssignment.exists({
+      teacherId,
+      classId,
+      schoolYearId: currentYear._id,
+      isActive: true
+    }));
   }
 };
 

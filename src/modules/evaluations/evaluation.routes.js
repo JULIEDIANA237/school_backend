@@ -23,6 +23,7 @@ router.post(
 router.get(
   "/class/:classId",
   protect,
+  authorize("teacher", "admin", "secretary"),
   (req, res, next) => {
     console.log("🧭 ROUTE GET /evaluations/class/:classId");
     console.log("➡️ params =", req.params);

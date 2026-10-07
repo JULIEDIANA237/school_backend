@@ -31,7 +31,7 @@ const BulletinController = {
       if (req.user.role === "teacher") {
         const bulletinBefore = await require("./bulletin.model").findById(bulletinId).populate("class");
         if (!bulletinBefore) return res.status(404).json({ error: "Bulletin introuvable" });
-        if (bulletinBefore.class.principalTeacher?.toString() !== req.user.id) {
+        if (bulletinBefore.class?.principalTeacher?.toString() !== req.user.id) {
           return res.status(403).json({ error: "Seul le professeur principal peut publier ce bulletin." });
         }
       }
@@ -96,6 +96,14 @@ const BulletinController = {
       const { bulletinId } = req.params;
       const bulletin = await BulletinService.getBulletinById(bulletinId);
       if (!bulletin) return res.status(404).json({ error: "Bulletin introuvable" });
+      if (req.user.role === "parent") {
+        const isOwner = (bulletin.student?.parents || []).some(
+          (p) => String(p._id || p) === String(req.user.id)
+        );
+        if (!isOwner || !bulletin.isPublished) {
+          return res.status(404).json({ error: "Bulletin introuvable" });
+        }
+      }
 
       const isTrimestre = bulletin.period?.type === "TRIMESTRE";
       const sequenceMarks = {};
@@ -265,6 +273,15 @@ const BulletinController = {
       const { classId, periodId } = req.body;
       if (!classId || !periodId) {
         return res.status(400).json({ error: "classId et periodId sont requis." });
+      }
+
+      if (req.user.role === "teacher") {
+        const Class = require("../classes/class.model");
+        const classBefore = await Class.findById(classId).select("principalTeacher");
+        if (!classBefore) return res.status(404).json({ error: "Classe introuvable" });
+        if (classBefore.principalTeacher?.toString() !== req.user.id) {
+          return res.status(403).json({ error: "Seul le professeur principal peut publier ce bulletin." });
+        }
       }
 
       const count = await BulletinService.bulkPublishBulletins(classId, periodId);

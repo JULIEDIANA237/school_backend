@@ -47,6 +47,8 @@ TWILIO_AUTH_TOKEN=votre_token_auth_twilio
 TWILIO_FROM_NUMBER=votre_numero_twilio
 ```
 
+En développement, l'API autorise également les origines de prévisualisation Vite `http://localhost:4173`, `http://localhost:4174`, `http://127.0.0.1:4173` et `http://127.0.0.1:4174`. Pour la production, `FRONTEND_URL` doit être défini sur l'origine exacte du frontend (sans chemin final).
+
 Ne publiez jamais le fichier `.env` ni les valeurs réelles de ces variables. Si des identifiants ou une URI MongoDB ont déjà été poussés sur GitHub, remplacez-les (notamment le mot de passe MongoDB) et retirez les secrets du dépôt et de son historique.
 
 ---
@@ -83,6 +85,10 @@ Ajoutez aussi les variables `MAIL_*` et `TWILIO_*` si les fonctionnalités email
 Cliquez sur **Deploy**, puis testez une route de l'API avec son URL Vercel, par exemple `https://mon-api.vercel.app/api/auth`. Les logs d'exécution sont disponibles dans l'onglet **Deployments → Functions**.
 
 Vercel exécute le backend sous forme de fonctions serverless : il ne faut pas appeler `app.listen()` dans le point d'entrée `api/index.js`. Pour des tâches longues ou exécutées en continu, utilisez plutôt un hébergeur qui fournit un serveur persistant.
+
+Les tentatives de connexion sont journalisées sous `[AUTH_LOGIN_ATTEMPT]`, `[AUTH_LOGIN_LOOKUP]`, `[AUTH_LOGIN_SUCCESS]` et `[AUTH_LOGIN_FAILURE]`, avec un identifiant de corrélation, le nom de la base/collection, le nombre de comptes correspondants et la cause technique de l'échec (`account_not_found` ou `password_mismatch`). Le rôle et l'ID ne sont journalisés qu'en cas de succès. Les mots de passe, tokens et identifiants saisis ne sont jamais écrits dans ces logs; la réponse publique reste volontairement générique pour ne pas révéler si un compte existe.
+
+L'inscription publique crée uniquement des comptes parents (`POST /api/auth/register`). La récupération de mot de passe utilise `POST /api/auth/forgot-password` puis `POST /api/auth/reset-password`; le jeton envoyé par email est à usage unique et expire après une heure. Configurez `MAIL_USER`, `MAIL_PASS` et `FRONTEND_URL` pour que les liens soient effectivement envoyés. Les endpoints de récupération sont limités en fréquence et la demande répond de manière identique, que l'adresse existe ou non.
 
 ---
 

@@ -12,7 +12,12 @@ router.post("/import", protect, authorize("admin", "secretary"), upload.single("
 router.get("/", protect, authorize("admin", "secretary"), StudentController.getAll);
 router.put("/:id", protect, authorize("admin", "secretary"), StudentController.update);
 
-router.get("/class/:classId", protect, StudentController.byClass);
+router.get(
+  "/class/:classId",
+  protect,
+  authorize("admin", "secretary", "teacher"),
+  StudentController.byClass
+);
 router.get("/parent/me", protect, authorize("parent"), StudentController.byParent);
 
 router.post(

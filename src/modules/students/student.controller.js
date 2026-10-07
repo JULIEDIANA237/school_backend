@@ -1,4 +1,5 @@
 const StudentService = require("./student.service");
+const TeacherAssignmentService = require("../teachers/teacherAssignment.service");
 
 const StudentController = {
   async create(req, res) {
@@ -20,6 +21,16 @@ const StudentController = {
   },
 
   async byClass(req, res) {
+    if (
+      req.user.role === "teacher" &&
+      !(await TeacherAssignmentService.isTeacherAssignedToClass(
+        req.user.id,
+        req.params.classId
+      ))
+    ) {
+      return res.status(403).json({ error: "Accès interdit à cette classe." });
+    }
+
     const students = await StudentService.getStudentsByClass(req.params.classId);
     res.json(students);
   },

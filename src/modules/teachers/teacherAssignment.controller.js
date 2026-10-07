@@ -1,4 +1,5 @@
 const Service = require("./teacherAssignment.service");
+const mongoose = require("mongoose");
 
 const TeacherAssignmentController = {
   async assign(req, res) {
@@ -20,14 +21,20 @@ const TeacherAssignmentController = {
   },
 
   async myClasses(req, res) {
-    console.log("USER ID =", req.user.id);
-    const data = await Service.getTeacherClasses(req.user.id);
-    console.log("CLASSES TROUVÉES =", data);
+    const { schoolYearId } = req.query;
+    if (schoolYearId !== undefined && (
+      typeof schoolYearId !== "string" ||
+      !mongoose.Types.ObjectId.isValid(schoolYearId)
+    )) {
+      return res.status(400).json({ error: "Identifiant d’année scolaire invalide" });
+    }
+    const data = await Service.getTeacherClasses(req.user.id, schoolYearId);
     res.json(data);
   },
 
   async classSubjects(req, res) {
-    const data = await Service.getClassSubjects(req.params.classId);
+    const teacherId = req.user.role === "admin" ? null : req.user.id;
+    const data = await Service.getClassSubjects(req.params.classId, teacherId);
     res.json(data);
   },
 
