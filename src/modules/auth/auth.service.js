@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const User = require("../users/user.model");
 const { sendEmail } = require("../../utils/mail");
 const { escapeRegex } = require("../../utils/text");
+const { frontendUrl } = require("../../utils/school");
 const {
   assertValidPassword,
   hashPassword,
@@ -20,10 +21,6 @@ const signToken = (user) =>
     algorithm: "HS256",
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
-
-/** Première origine de FRONTEND_URL (la variable peut contenir une liste pour CORS). */
-const frontendBaseUrl = () =>
-  (process.env.FRONTEND_URL || "http://localhost:8080").split(",")[0].trim().replace(/\/+$/, "");
 
 /**
  * Inscription publique : crée uniquement un compte parent.
@@ -76,7 +73,7 @@ const requestPasswordReset = async (email) => {
 
   const resetUrl = new URL(
     `/auth/reset-password?token=${encodeURIComponent(token)}`,
-    frontendBaseUrl(),
+    frontendUrl(),
   ).toString();
 
   try {

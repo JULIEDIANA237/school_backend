@@ -29,3 +29,13 @@ test("adresses de test ou fictives jamais contactées, même hors MESSAGES_DRY_R
     assert.equal(result.messageId, "skipped-reserved-domain", to);
   }
 });
+
+test("liens des emails : PUBLIC_APP_URL prioritaire sur FRONTEND_URL", () => {
+  const { frontendUrl } = require("../src/utils/school");
+  process.env.FRONTEND_URL = "http://localhost:8080,https://autre.example";
+  delete process.env.PUBLIC_APP_URL;
+  assert.equal(frontendUrl(), "http://localhost:8080");
+  process.env.PUBLIC_APP_URL = "http://192.168.1.177:8080/";
+  assert.equal(frontendUrl(), "http://192.168.1.177:8080");
+  delete process.env.PUBLIC_APP_URL;
+});
