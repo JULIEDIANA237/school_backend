@@ -17,6 +17,7 @@ const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
 const cycleRoutes = require("./modules/cycles/cycle.routes");
 const classSubjectRoutes = require("./modules/classes/classSubject.routes");
 const schoolYearRoutes = require("./modules/schoolYear/schoolYear.routes");
+const schoolRoutes = require("./modules/school/school.routes");
 const { createLimiter } = require("./utils/rateLimit");
 const { notFound, errorHandler } = require("./middlewares/error.middleware");
 const { runDeadlineReminders } = require("./modules/periods/deadlineReminder.service");
@@ -100,6 +101,7 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/cycles", cycleRoutes);
 app.use("/api/class-subjects", classSubjectRoutes);
 app.use("/api/school-years", schoolYearRoutes);
+app.use("/api/school", schoolRoutes);
 
 // Tâche planifiée (vercel.json → crons) : rappels de clôture aux enseignants.
 // Vercel envoie « Authorization: Bearer <CRON_SECRET> » lorsque la variable CRON_SECRET est définie.

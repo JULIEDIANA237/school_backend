@@ -4,8 +4,9 @@ const Evaluation = require("../evaluations/evaluation.model");
 const TeacherAssignment = require("../teachers/teacherAssignment.model");
 const notificationService = require("../notifications/notification.service");
 const { sendEmail } = require("../../utils/mail");
-const { escapeHtml } = require("../../utils/text");
-const { schoolName, frontendUrl, formatSchoolDate } = require("../../utils/school");
+const { frontendUrl, formatSchoolDate } = require("../../utils/school");
+const { buildSchoolEmail } = require("../../utils/schoolEmail");
+const { getSchoolProfile, shortLabel } = require("../school/school.service");
 const { httpError } = require("../../utils/httpError");
 
 /** Rappels envoyés aux enseignants, en jours avant la fin de la séquence. */
@@ -67,7 +68,7 @@ const pendingWorkByTeacher = async (period) => {
 
 /** Notification (et email) à chaque enseignant qui a encore des notes à publier sur la séquence. */
 const sendReminders = async (period, daysLeft) => {
-  const work = await pendingWorkByTeacher(period);
+  const [work, profile] = await Promise.all([pendingWorkByTeacher(period), getSchoolProfile()]);
   const when = whenLabel(daysLeft);
   const endDate = formatSchoolDate(period.endDate);
   const deadline = daysLeft < 0 ? `est terminée depuis le ${endDate}` : `se termine ${when} (${endDate})`;
@@ -87,17 +88,15 @@ const sendReminders = async (period, daysLeft) => {
       type: "WARNING",
       link: "/teacher/evaluations",
     });
-    if (teacher.email && !teacher.email.endsWith("@eduflow.local")) {
-      emails.push({
-        to: teacher.email,
-        subject: `${schoolName()} – ${title}`,
-        text: `Bonjour ${teacher.firstName},\n\n${message}\n\n${frontendUrl()}/teacher/evaluations`,
-        html:
-          `<p>Bonjour ${escapeHtml(teacher.firstName)},</p>` +
-          `<p>La <strong>${escapeHtml(period.name)}</strong> ${escapeHtml(deadline)}.</p>` +
-          `<p>À faire :</p><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>` +
-          `<p><a href="${escapeHtml(`${frontendUrl()}/teacher/evaluations`)}">Publier mes notes</a></p>`,
+    if (teacher.email) {
+      const { fromName, ...email } = buildSchoolEmail(profile, {
+        title,
+        greeting: teacher.firstName,
+        paragraphs: [`La ${period.name} ${deadline}. Voici ce qui reste à faire :`],
+        items,
+        cta: { label: "Publier mes notes", url: `${frontendUrl()}/teacher/evaluations` },
       });
+      emails.push({ to: teacher.email, subject: `${shortLabel(profile)} – ${title}`, fromName, ...email });
     }
   }
 

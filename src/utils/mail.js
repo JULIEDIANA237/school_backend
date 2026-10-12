@@ -47,7 +47,11 @@ const isDryRun = () => process.env.MESSAGES_DRY_RUN === "true";
 const RESERVED_DOMAIN = /(^|\.)(test|example|invalid|localhost|local)$|(^|\.)example\.(com|net|org)$/i;
 const isReservedAddress = (to) => RESERVED_DOMAIN.test(String(to || "").split("@").pop().trim());
 
-const sendEmail = async ({ to, subject, html, text }) => {
+/**
+ * @param {{ to: string, subject: string, html?: string, text?: string, attachments?: object[], fromName?: string }} message
+ *   fromName : nom affiché de l'expéditeur (celui de l'établissement)
+ */
+const sendEmail = async ({ to, subject, html, text, attachments, fromName = "EduBulletin" }) => {
   const user = process.env.MAIL_USER;
   const pass = process.env.MAIL_PASS;
 
@@ -68,11 +72,12 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
   try {
     return await getTransporter(user, pass).sendMail({
-      from: `"EduFlow Bulletin" <${user}>`,
+      from: { name: String(fromName).replace(/["\r\n]/g, ""), address: user },
       to,
       subject,
       text,
       html,
+      attachments,
     });
   } catch (error) {
     console.error("[MAIL_SEND_FAILURE]", error.message);

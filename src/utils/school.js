@@ -1,6 +1,5 @@
-/** Identité de l'établissement, configurable sans modifier le code. */
-const schoolName = () => process.env.SCHOOL_NAME || "COLLÈGE BILINGUE CEDEVE";
-const schoolShortName = () => process.env.SCHOOL_SHORT_NAME || "CEDEVE";
+// L'identité de l'établissement (nom, logo, coordonnées) est enregistrée en base : voir modules/school.
+
 /**
  * Adresse publique de l'application, utilisée dans les liens des emails. PUBLIC_APP_URL si elle est
  * définie (indispensable en local : un lien « localhost » ne s'ouvre pas sur le téléphone du parent),
@@ -16,4 +15,4 @@ const schoolTimeZone = () => process.env.SCHOOL_TIMEZONE || "Africa/Douala";
 const formatSchoolDate = (value) =>
   value ? new Date(value).toLocaleDateString("fr-FR", { timeZone: schoolTimeZone() }) : "";
 
-module.exports = { schoolName, schoolShortName, frontendUrl, schoolTimeZone, formatSchoolDate };
+module.exports = { frontendUrl, schoolTimeZone, formatSchoolDate };

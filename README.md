@@ -66,7 +66,7 @@ Dans **Project → Settings → Environment Variables**, ajoutez au minimum :
 | `BULLETIN_VERIFY_SECRET` | Secret des QR codes de vérification (à ne plus changer une fois des bulletins imprimés) |
 | `NODE_ENV` | `production` |
 
-Ajoutez aussi les variables `MAIL_*` et `TWILIO_*` si les fonctionnalités email ou SMS sont utilisées, et `SCHOOL_NAME` / `SCHOOL_SHORT_NAME` pour l'identité de l'établissement. Après toute modification des variables, redéployez le projet pour les appliquer.
+Ajoutez aussi les variables `MAIL_*` et `TWILIO_*` si les fonctionnalités email ou SMS sont utilisées. L'identité de l'établissement (nom, logo, coordonnées, modèle de bulletin) est enregistrée en base (`GET`/`PUT /api/school`) et se renseigne dans l'application, page Établissement ; une base de données par établissement. Après toute modification des variables, redéployez le projet pour les appliquer.
 
 Les emails et SMS de publication des bulletins partent après la réponse HTTP grâce à `waitUntil` (`@vercel/functions`) : la fonction reste active jusqu'à la fin des envois. Les compteurs de limitation de débit sont stockés dans MongoDB (collection `ratelimits`, purgée automatiquement), car la mémoire n'est pas partagée entre les instances serverless.
 
