@@ -5,6 +5,8 @@ const User = require("../users/user.model");
 const { sendEmail } = require("../../utils/mail");
 const { escapeRegex } = require("../../utils/text");
 const { frontendUrl } = require("../../utils/school");
+const { buildSchoolEmail } = require("../../utils/schoolEmail");
+const { getSchoolProfile, shortLabel } = require("../school/school.service");
 const {
   assertValidPassword,
   hashPassword,
@@ -77,12 +79,17 @@ const requestPasswordReset = async (email) => {
   ).toString();
 
   try {
-    await sendEmail({
-      to: user.email,
-      subject: "Réinitialisation de votre mot de passe EduFlow",
-      text: `Pour choisir un nouveau mot de passe, ouvrez ce lien (valable une heure) : ${resetUrl}`,
-      html: `<p>Une demande de réinitialisation de mot de passe a été reçue.</p><p><a href="${resetUrl}">Choisir un nouveau mot de passe</a></p><p>Ce lien expire dans une heure. Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.</p>`,
+    const profile = await getSchoolProfile();
+    const { fromName, ...email } = buildSchoolEmail(profile, {
+      title: "Réinitialisation de votre mot de passe",
+      greeting: user.firstName,
+      paragraphs: [
+        "Une demande de réinitialisation de mot de passe a été reçue pour votre compte.",
+        "Ce lien expire dans une heure. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.",
+      ],
+      cta: { label: "Choisir un nouveau mot de passe", url: resetUrl },
     });
+    await sendEmail({ to: user.email, subject: `${shortLabel(profile)} – Réinitialisation de votre mot de passe`, fromName, ...email });
   } catch (error) {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;

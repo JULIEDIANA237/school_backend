@@ -1,5 +1,6 @@
 // bulletin.model.js
 const mongoose = require("mongoose");
+const { BULLETIN_TEMPLATES } = require("../school/school.model");
 const { Schema, model } = mongoose;
 
 const bulletinSchema = new Schema(
@@ -38,6 +39,8 @@ const bulletinSchema = new Schema(
     decisions: [String], // Pour stocker les cases cochées
     isPublished: { type: Boolean, default: false },
     publishedAt: Date,
+    // Modèle de mise en page choisi à la génération (le parent voit le même que l'administration)
+    template: { type: String, enum: BULLETIN_TEMPLATES },
   },
   { timestamps: true }
 );

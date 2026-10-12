@@ -11,6 +11,7 @@ const ClassSubject = require("../classes/classSubject.model");
 const TeacherAssignment = require("../teachers/teacherAssignment.model");
 const calc = require("./bulletin.calculator");
 const { httpError } = require("../../utils/httpError");
+const { assertTemplate, getSchoolProfile } = require("../school/school.service");
 
 const DECISION_CODES = ["TH", "AT", "THE", "BT", "THF", "ET", "AC", "BC", "EC"];
 const idOf = (value) => String(value?._id ?? value);
@@ -154,7 +155,16 @@ const assertNotFrozen = async (classId, periodId) => {
  * - Refusé si un bulletin de la classe est déjà publié pour la période (classement figé).
  * - Les brouillons d'élèves sortis de la classe sont retirés.
  */
-const generateForClass = async (classId, periodId) => {
+/**
+ * @param {string} [template] modèle de mise en page choisi par l'administration ; à défaut, celui de
+ *   l'établissement. Il est enregistré sur chaque bulletin.
+ */
+const generateForClass = async (classId, periodId, template) => {
+  // Modèle choisi : appliqué à toute la classe. Sans choix (recalcul d'un élève…), les bulletins existants
+  // gardent le leur et les nouveaux prennent celui de l'établissement.
+  const templateUpdate = template
+    ? { $set: { template: assertTemplate(template) } }
+    : { $setOnInsert: { template: (await getSchoolProfile()).defaultTemplate } };
   const ctx = await loadContext(classId, periodId);
   await assertNotFrozen(classId, periodId);
 
@@ -186,7 +196,9 @@ const generateForClass = async (classId, periodId) => {
               generalAverage: e.generalAverage,
               rank: e.rank,
               classifiedCount: ranked.classifiedCount,
+              ...templateUpdate.$set,
             },
+            ...(templateUpdate.$setOnInsert && { $setOnInsert: templateUpdate.$setOnInsert }),
           },
           upsert: true,
         },

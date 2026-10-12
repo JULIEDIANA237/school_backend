@@ -158,10 +158,10 @@ const BulletinController = {
   // Génère les bulletins d'une classe sans effacer les appréciations ni les décisions
   async generateForClass(req, res) {
     try {
-      const { classId, periodId } = req.body || {};
+      const { classId, periodId, template } = req.body || {};
       if (!classId || !periodId) return res.status(400).json({ error: "classId et periodId sont requis." });
 
-      const result = await BulletinService.generateForClass(classId, periodId);
+      const result = await BulletinService.generateForClass(classId, periodId, template);
       const notes = [];
       if (result.unclassified) notes.push(`${result.unclassified} élève(s) sans aucune note (non classés)`);
       if (result.skipped) notes.push(`${result.skipped} élève(s) ignoré(s) : bulletin déjà publié dans une autre classe`);

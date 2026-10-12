@@ -1,8 +1,9 @@
 const Notification = require("./notification.model");
 const { sendEmail } = require("../../utils/mail");
 const { sendSMS } = require("../../utils/sms");
-const { escapeHtml } = require("../../utils/text");
-const { schoolName, schoolShortName, frontendUrl } = require("../../utils/school");
+const { frontendUrl } = require("../../utils/school");
+const { buildSchoolEmail } = require("../../utils/schoolEmail");
+const { getSchoolProfile, displayName, shortLabel } = require("../school/school.service");
 
 const rankLabel = (bulletin) => {
   if (!bulletin.rank) return "non classé";
@@ -77,32 +78,22 @@ const notificationService = {
   },
 
   /**
-   * Emails de suivi aux parents (nouvelle évaluation, note publiée), envoyés l'un après l'autre.
+   * Emails de suivi aux parents (nouvelle évaluation, note publiée), envoyés l'un après l'autre,
+   * aux couleurs et avec les coordonnées de l'établissement.
    * @param {{ parent: { email, firstName }, content: { title, message } }[]} jobs
    */
   async sendParentEmails(jobs) {
+    const profile = await getSchoolProfile();
     const link = `${frontendUrl()}/parent`;
     for (const { parent, content } of jobs) {
       try {
-        await sendEmail({
-          to: parent.email,
-          subject: `${schoolShortName()} – ${content.title}`,
-          text: `Bonjour ${parent.firstName || "Parent"},\n\n${content.message}\n\nSuivez la scolarité de votre enfant sur votre espace parent : ${link}\n\n${schoolName()}`,
-          html: `
-            <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: auto;">
-              <div style="background: #4f46e5; padding: 16px 20px; border-radius: 8px 8px 0 0;">
-                <h2 style="color: white; margin: 0; font-size: 18px;">${escapeHtml(content.title)}</h2>
-              </div>
-              <div style="border: 1px solid #e5e7eb; padding: 20px; border-radius: 0 0 8px 8px;">
-                <p>Bonjour <strong>${escapeHtml(parent.firstName || "Parent")}</strong>,</p>
-                <p>${escapeHtml(content.message)}</p>
-                <p style="margin: 24px 0;">
-                  <a href="${escapeHtml(link)}" style="background: #4f46e5; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none;">Ouvrir mon espace parent</a>
-                </p>
-                <p style="color: #6b7280; font-size: 12px;">${escapeHtml(schoolName())}</p>
-              </div>
-            </div>`,
+        const { fromName, ...email } = buildSchoolEmail(profile, {
+          title: content.title,
+          greeting: parent.firstName || "Parent",
+          paragraphs: [content.message, "Suivez la scolarité de votre enfant tout au long de l'année depuis votre espace parent."],
+          cta: { label: "Ouvrir mon espace parent", url: link },
         });
+        await sendEmail({ to: parent.email, subject: `${shortLabel(profile)} – ${content.title}`, fromName, ...email });
       } catch (err) {
         console.error("[PARENT_EMAIL_FAILURE]", err.message);
       }
@@ -113,6 +104,7 @@ const notificationService = {
   async sendBulletinPublicationMessages(bulletin) {
     const student = bulletin?.student;
     if (!student) return;
+    const profile = await getSchoolProfile();
     const periodName = bulletin.period?.name || "Période";
     const studentName = `${student.lastName} ${student.firstName}`;
 
@@ -121,42 +113,30 @@ const notificationService = {
         try {
           await sendSMS({
             to: parent.phone,
-            message: `[${schoolShortName()}] Bulletin de ${studentName} (${periodName}) disponible. Moy: ${averageLabel(bulletin)}, Rang: ${rankLabel(bulletin)}. Connectez-vous sur votre espace parent.`,
+            message: `[${shortLabel(profile)}] Bulletin de ${studentName} (${periodName}) disponible. Moy: ${averageLabel(bulletin)}, Rang: ${rankLabel(bulletin)}. Connectez-vous sur votre espace parent.`,
           });
         } catch (err) {
           console.error("[NOTIFICATION_SMS_FAILURE]", err.message);
         }
       }
 
-      if (parent.email && !parent.email.includes("@eduflow.local")) {
+      if (parent.email) {
         try {
+          const { fromName, ...email } = buildSchoolEmail(profile, {
+            title: "Bulletin scolaire disponible",
+            greeting: parent.firstName || "Parent",
+            paragraphs: [
+              `Le bulletin de votre enfant ${studentName} pour la période ${periodName} a été publié.`,
+              `L'administration de ${displayName(profile)}`,
+            ],
+            highlight: [`Moyenne générale : ${averageLabel(bulletin)}`, `Rang : ${rankLabel(bulletin)}`],
+            cta: { label: "Voir le bulletin", url: `${frontendUrl()}/parent/bulletins/${bulletin._id}` },
+          });
           await sendEmail({
             to: parent.email,
-            subject: `Bulletin scolaire - ${studentName} - ${periodName}`,
-            html: `
-            <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: auto;">
-              <div style="background: #4f46e5; padding: 20px; border-radius: 8px 8px 0 0;">
-                <h2 style="color: white; margin: 0;">Bulletin scolaire disponible</h2>
-              </div>
-              <div style="border: 1px solid #e5e7eb; padding: 20px; border-radius: 0 0 8px 8px;">
-                <p>Bonjour <strong>${escapeHtml(parent.firstName || "Parent")}</strong>,</p>
-                <p>Le bulletin scolaire de votre enfant <strong>${escapeHtml(studentName)}</strong> pour la période <strong>${escapeHtml(periodName)}</strong> a été publié.</p>
-                <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4f46e5;">
-                  <p style="margin: 5px 0;"><strong>Moyenne générale :</strong> ${escapeHtml(averageLabel(bulletin))}</p>
-                  <p style="margin: 5px 0;"><strong>Rang :</strong> ${escapeHtml(rankLabel(bulletin))}</p>
-                </div>
-                <p>Vous pouvez consulter le bulletin détaillé dans votre espace parent :</p>
-                <a href="${escapeHtml(frontendUrl())}/parent/bulletins/${escapeHtml(String(bulletin._id))}"
-                   style="display: inline-block; background: #4f46e5; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
-                   Accéder à mon espace
-                </a>
-                <p style="margin-top: 30px; font-size: 0.85em; color: #666;">
-                  Cordialement,<br>
-                  L'administration du <strong>${escapeHtml(schoolName())}</strong>
-                </p>
-              </div>
-            </div>
-          `,
+            subject: `${shortLabel(profile)} – Bulletin de ${studentName} (${periodName})`,
+            fromName,
+            ...email,
           });
         } catch (err) {
           console.error("[NOTIFICATION_EMAIL_FAILURE]", err.message);
