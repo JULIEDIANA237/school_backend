@@ -42,13 +42,21 @@ const allowedOrigins = new Set(
   process.env.NODE_ENV === "production" ? configuredOrigins : [...configuredOrigins, ...DEV_ORIGINS]
 );
 
+// Hors production : un téléphone du même réseau Wi-Fi qui ouvre l'application via l'adresse IP du poste
+const PRIVATE_NETWORK_ORIGIN =
+  /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+const isAllowedOrigin = (origin) =>
+  !origin ||
+  allowedOrigins.has(origin) ||
+  (process.env.NODE_ENV !== "production" && PRIVATE_NETWORK_ORIGIN.test(origin));
+
 app.set("trust proxy", 1); // Vercel
 app.disable("x-powered-by");
 app.use(helmet());
 
 app.use(
   cors({
-    origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     credentials: true,
   })
 );

@@ -463,3 +463,12 @@ describe("Espace enseignant", () => {
     assert.equal(notification.link, `/teacher/grades?class=${d.classA._id}&subject=${d.math._id}`);
   });
 });
+
+describe("CORS", () => {
+  test("hors production, un téléphone du réseau local est accepté ; une origine extérieure ne l'est pas", async () => {
+    const lan = await request(app).get("/").set("Origin", "http://192.168.1.177:8080");
+    assert.equal(lan.headers["access-control-allow-origin"], "http://192.168.1.177:8080");
+    const outside = await request(app).get("/").set("Origin", "https://site-inconnu.example");
+    assert.equal(outside.headers["access-control-allow-origin"], undefined);
+  });
+});
