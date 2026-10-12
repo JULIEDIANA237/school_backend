@@ -40,5 +40,12 @@
     "mongodbMemoryServer": {
       "disablePostinstall": "1"
     }
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src",
+      ".env"
+    ],
+    "ext": "js,json,env"
   }
 }
