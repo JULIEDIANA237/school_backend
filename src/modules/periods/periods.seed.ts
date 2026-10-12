@@ -15,7 +15,7 @@ export default async function seedPeriods() {
     let t = await Period.findOneAndUpdate(
       { name: data.name, year },
       { ...data, year },
-      { new: true, upsert: true }
+      { returnDocument: "after", upsert: true }
     );
     trimestres.push(t);
   }

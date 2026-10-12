@@ -19,7 +19,8 @@ const studentSchema = new mongoose.Schema(
       default: 'EN_ATTENTE'
     },
 
-    dateOfBirth: { type: Date, required: true },
+    // Facultative : mieux vaut un champ vide sur le bulletin qu'une date inventée
+    dateOfBirth: { type: Date },
     placeOfBirth: { type: String, trim: true },
     gender: { type: String, enum: ['M', 'F'], required: false },
     isRepeating: { type: Boolean, default: false },

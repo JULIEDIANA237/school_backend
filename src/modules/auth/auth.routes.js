@@ -1,20 +1,35 @@
 const express = require("express");
-const { rateLimit } = require("express-rate-limit");
 const AuthController = require("./auth.controller");
+const { createLimiter, ipAndIdentifierKey } = require("../../utils/rateLimit");
 
 const router = express.Router();
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
-router.post("/register", AuthController.register);
+router.post(
+  "/register",
+  createLimiter({ name: "register", windowMs: 60 * 60 * 1000, limit: 10 }),
+  AuthController.register,
+);
 router.post(
   "/forgot-password",
-  rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false }),
+  createLimiter({ name: "forgot-password", windowMs: FIFTEEN_MINUTES, limit: 5 }),
   AuthController.requestPasswordReset,
 );
 router.post(
   "/reset-password",
-  rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false }),
+  createLimiter({ name: "reset-password", windowMs: FIFTEEN_MINUTES, limit: 10 }),
   AuthController.resetPassword,
 );
-router.post("/login", AuthController.login);
+router.post(
+  "/login",
+  createLimiter({
+    name: "login",
+    windowMs: FIFTEEN_MINUTES,
+    limit: 10,
+    keyGenerator: ipAndIdentifierKey,
+    message: "Trop de tentatives de connexion pour ce compte. Réessayez dans 15 minutes.",
+  }),
+  AuthController.login,
+);
 
 module.exports = router;

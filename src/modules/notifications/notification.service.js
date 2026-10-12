@@ -1,20 +1,30 @@
 const Notification = require("./notification.model");
 const { sendEmail } = require("../../utils/mail");
 const { sendSMS } = require("../../utils/sms");
-const Bulletin = require("../bulletins/bulletin.model");
+const { escapeHtml } = require("../../utils/text");
+const { schoolName, schoolShortName, frontendUrl } = require("../../utils/school");
+
+const rankLabel = (bulletin) => {
+  if (!bulletin.rank) return "non classé";
+  const suffix = bulletin.rank === 1 ? "er" : "e";
+  return `${bulletin.rank}${suffix}${bulletin.classifiedCount ? `/${bulletin.classifiedCount}` : ""}`;
+};
+
+const averageLabel = (bulletin) =>
+  bulletin.generalAverage === null || bulletin.generalAverage === undefined
+    ? "non classé"
+    : `${Number(bulletin.generalAverage).toFixed(2)}/20`;
 
 const notificationService = {
   async getNotifications(userId) {
-    return await Notification.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(20);
+    return Notification.find({ user: userId }).sort({ createdAt: -1 }).limit(20);
   },
 
   async markAsRead(notificationId, userId) {
     const notification = await Notification.findOneAndUpdate(
       { _id: notificationId, user: userId },
       { isRead: true },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!notification) throw new Error("Notification not found");
     return notification;
@@ -25,117 +35,135 @@ const notificationService = {
   },
 
   async createNotification(data) {
-    return await Notification.create(data);
+    return Notification.create(data);
+  },
+
+  /** Plusieurs notifications en une seule écriture (une erreur n'empêche pas les autres). */
+  async createMany(docs) {
+    if (!docs.length) return;
+    await Notification.insertMany(docs, { ordered: false });
   },
 
   async deleteNotification(notificationId, userId) {
-    return await Notification.findOneAndDelete({ _id: notificationId, user: userId });
+    return Notification.findOneAndDelete({ _id: notificationId, user: userId });
+  },
+
+  /** Notification dans l'application pour chaque parent (rapide, attendue avant de répondre). */
+  /** Notifications « Bulletin publié » destinées aux parents d'un élève. */
+  bulletinPublicationNotifications(bulletin) {
+    const student = bulletin?.student;
+    if (!student) return [];
+    const periodName = bulletin.period?.name || "la période";
+    return (student.parents || []).filter(Boolean).map((parent) => ({
+      user: parent._id,
+      title: "Bulletin publié",
+      message: `Le bulletin de ${student.firstName} pour ${periodName} est disponible. Moyenne : ${averageLabel(bulletin)}, rang : ${rankLabel(bulletin)}.`,
+      type: "INFO",
+      link: `/parent/bulletins/${bulletin._id}`,
+    }));
+  },
+
+  async notifyBulletinPublicationInApp(bulletin) {
+    return this.notifyBulletinsPublicationInApp([bulletin]);
+  },
+
+  /** Une seule insertion pour tous les parents de tous les bulletins publiés. */
+  async notifyBulletinsPublicationInApp(bulletins) {
+    const docs = bulletins.flatMap((b) => this.bulletinPublicationNotifications(b));
+    if (!docs.length) return;
+    await Notification.insertMany(docs, { ordered: false }).catch((err) =>
+      console.error("[NOTIFICATION_IN_APP_FAILURE]", err.message),
+    );
   },
 
   /**
-   * Notifie les parents lors de la publication d'un bulletin.
+   * Emails de suivi aux parents (nouvelle évaluation, note publiée), envoyés l'un après l'autre.
+   * @param {{ parent: { email, firstName }, content: { title, message } }[]} jobs
    */
-  async notifyBulletinPublication(bulletin) {
-    if (!bulletin || !bulletin.student) return;
-
-    const student = bulletin.student;
-    const parents = student.parents || [];
-    const avg = (bulletin.generalAverage || 0).toFixed(2);
-    const rank = bulletin.rank || 0;
-    const rankSuffix = rank === 1 ? "er" : "e";
-    const periodName = bulletin.period?.name || "Période";
-
-    // Compter le nombre total d'élèves dans la même classe/période
-    let total = "?";
-    try {
-      const classId = bulletin.class?._id || bulletin.class;
-      const periodId = bulletin.period?._id || bulletin.period;
-      if (classId && periodId) {
-        total = await Bulletin.countDocuments({ class: classId, period: periodId });
-      }
-    } catch (err) {
-      console.warn("   ⚠️  Impossible de compter les élèves:", err.message);
-    }
-
-    console.log(`\n📣 Notification de publication du bulletin - ${student.lastName} ${student.firstName}`);
-    console.log(`   👨‍👩‍👧 Parents à notifier : ${parents.length}`);
-
-    for (const parent of parents) {
-      if (!parent) continue;
-
-      console.log(`\n   🔔 Notification pour le parent : ${parent.firstName || ""} ${parent.lastName || ""} (${parent.email || "pas d'email"})`);
-
-      // 1. Notification In-App
+  async sendParentEmails(jobs) {
+    const link = `${frontendUrl()}/parent`;
+    for (const { parent, content } of jobs) {
       try {
-        await this.createNotification({
-          user: parent._id,
-          title: "Bulletin publié",
-          message: `Le bulletin de ${student.firstName} pour ${periodName} est disponible. Moyenne: ${avg}/20, Rang: ${rank}${rankSuffix}/${total}.`,
-          type: "INFO",
-          link: `/parent/bulletins?id=${bulletin._id}`
-        });
-        console.log(`   ✅ Notification In-App créée`);
-      } catch (err) {
-        console.error(`   ❌ Échec notification In-App:`, err.message);
-      }
-
-      // 2. Notification SMS
-      if (parent.phone) {
-        try {
-          const smsText = `[CEDEVE] Bulletin de ${student.lastName} ${student.firstName} (${periodName}) disponible. Moy: ${avg}/20, Rang: ${rank}${rankSuffix}/${total}. Connectez-vous sur votre espace parent.`;
-          console.log(`   📱 Envoi SMS à ${parent.phone}...`);
-          await sendSMS({ to: parent.phone, message: smsText });
-        } catch (err) {
-          console.error(`   ❌ Échec SMS (${parent.phone}):`, err.message);
-        }
-      } else {
-        console.log(`   📱 Pas de numéro de téléphone pour ce parent, SMS ignoré.`);
-      }
-
-      // 3. Notification Email
-      if (parent.email && !parent.email.includes("@eduflow.local")) {
-        try {
-          const emailSubject = `Bulletin Scolaire - ${student.lastName} ${student.firstName} - ${periodName}`;
-          const emailHtml = `
+        await sendEmail({
+          to: parent.email,
+          subject: `${schoolShortName()} – ${content.title}`,
+          text: `Bonjour ${parent.firstName || "Parent"},\n\n${content.message}\n\nSuivez la scolarité de votre enfant sur votre espace parent : ${link}\n\n${schoolName()}`,
+          html: `
             <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: auto;">
-              <div style="background: #4f46e5; padding: 20px; border-radius: 8px 8px 0 0;">
-                <h2 style="color: white; margin: 0;">📋 Bulletin Scolaire Disponible</h2>
+              <div style="background: #4f46e5; padding: 16px 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="color: white; margin: 0; font-size: 18px;">${escapeHtml(content.title)}</h2>
               </div>
               <div style="border: 1px solid #e5e7eb; padding: 20px; border-radius: 0 0 8px 8px;">
-                <p>Bonjour <strong>${parent.firstName || "Parent"}</strong>,</p>
-                <p>Le bulletin scolaire de votre enfant <strong>${student.lastName} ${student.firstName}</strong> pour la période <strong>${periodName}</strong> a été publié.</p>
-                
-                <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4f46e5;">
-                  <p style="margin: 5px 0;"><strong>Moyenne Générale :</strong> ${avg} / 20</p>
-                  <p style="margin: 5px 0;"><strong>Rang :</strong> ${rank}<sup>${rankSuffix}</sup> sur ${total} élève${total > 1 ? 's' : ''}</p>
-                </div>
+                <p>Bonjour <strong>${escapeHtml(parent.firstName || "Parent")}</strong>,</p>
+                <p>${escapeHtml(content.message)}</p>
+                <p style="margin: 24px 0;">
+                  <a href="${escapeHtml(link)}" style="background: #4f46e5; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none;">Ouvrir mon espace parent</a>
+                </p>
+                <p style="color: #6b7280; font-size: 12px;">${escapeHtml(schoolName())}</p>
+              </div>
+            </div>`,
+        });
+      } catch (err) {
+        console.error("[PARENT_EMAIL_FAILURE]", err.message);
+      }
+    }
+  },
 
-                <p>Vous pouvez consulter le bulletin détaillé en vous connectant à votre espace parent :</p>
-                <a href="${process.env.FRONTEND_URL || 'http://localhost:8080'}/login" 
+  /** SMS et emails aux parents (lents : exécutés après la réponse HTTP). */
+  async sendBulletinPublicationMessages(bulletin) {
+    const student = bulletin?.student;
+    if (!student) return;
+    const periodName = bulletin.period?.name || "Période";
+    const studentName = `${student.lastName} ${student.firstName}`;
+
+    for (const parent of (student.parents || []).filter(Boolean)) {
+      if (parent.phone) {
+        try {
+          await sendSMS({
+            to: parent.phone,
+            message: `[${schoolShortName()}] Bulletin de ${studentName} (${periodName}) disponible. Moy: ${averageLabel(bulletin)}, Rang: ${rankLabel(bulletin)}. Connectez-vous sur votre espace parent.`,
+          });
+        } catch (err) {
+          console.error("[NOTIFICATION_SMS_FAILURE]", err.message);
+        }
+      }
+
+      if (parent.email && !parent.email.includes("@eduflow.local")) {
+        try {
+          await sendEmail({
+            to: parent.email,
+            subject: `Bulletin scolaire - ${studentName} - ${periodName}`,
+            html: `
+            <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: auto;">
+              <div style="background: #4f46e5; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="color: white; margin: 0;">Bulletin scolaire disponible</h2>
+              </div>
+              <div style="border: 1px solid #e5e7eb; padding: 20px; border-radius: 0 0 8px 8px;">
+                <p>Bonjour <strong>${escapeHtml(parent.firstName || "Parent")}</strong>,</p>
+                <p>Le bulletin scolaire de votre enfant <strong>${escapeHtml(studentName)}</strong> pour la période <strong>${escapeHtml(periodName)}</strong> a été publié.</p>
+                <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4f46e5;">
+                  <p style="margin: 5px 0;"><strong>Moyenne générale :</strong> ${escapeHtml(averageLabel(bulletin))}</p>
+                  <p style="margin: 5px 0;"><strong>Rang :</strong> ${escapeHtml(rankLabel(bulletin))}</p>
+                </div>
+                <p>Vous pouvez consulter le bulletin détaillé dans votre espace parent :</p>
+                <a href="${escapeHtml(frontendUrl())}/parent/bulletins/${escapeHtml(String(bulletin._id))}"
                    style="display: inline-block; background: #4f46e5; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
-                   Accéder à mon espace →
+                   Accéder à mon espace
                 </a>
-                
                 <p style="margin-top: 30px; font-size: 0.85em; color: #666;">
                   Cordialement,<br>
-                  L'administration du <strong>COLLEGE BILINGUE CEDEVE</strong>
+                  L'administration du <strong>${escapeHtml(schoolName())}</strong>
                 </p>
               </div>
             </div>
-          `;
-          console.log(`   📧 Envoi email à ${parent.email}...`);
-          await sendEmail({ to: parent.email, subject: emailSubject, html: emailHtml });
-          console.log(`   ✅ Email envoyé à ${parent.email}`);
+          `,
+          });
         } catch (err) {
-          console.error(`   ❌ Échec Email (${parent.email}):`, err.message);
+          console.error("[NOTIFICATION_EMAIL_FAILURE]", err.message);
         }
-      } else {
-        console.log(`   📧 Pas d'adresse email valide pour ce parent, email ignoré.`);
       }
     }
-
-    console.log(`\n✅ Notifications terminées pour le bulletin de ${student.lastName} ${student.firstName}\n`);
-  }
+  },
 };
 
 module.exports = notificationService;

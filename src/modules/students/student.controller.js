@@ -1,89 +1,47 @@
 const StudentService = require("./student.service");
-const TeacherAssignmentService = require("../teachers/teacherAssignment.service");
+const { sendError } = require("../../utils/httpError");
+const { assertClassAccess } = require("../../utils/access");
+
+const handle = (fn, successStatus = 200) => async (req, res) => {
+  try {
+    res.status(successStatus).json(await fn(req));
+  } catch (error) {
+    sendError(res, error);
+  }
+};
 
 const StudentController = {
-  async create(req, res) {
-    try {
-      const student = await StudentService.createStudent(req.body);
-      res.status(201).json(student);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
+  create: handle((req) => StudentService.createStudent(req.body || {}), 201),
 
-  async update(req, res) {
-    try {
-      const student = await StudentService.updateStudent(req.params.id, req.body);
-      res.json(student);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
+  update: handle((req) => StudentService.updateStudent(req.params.id, req.body || {})),
 
-  async byClass(req, res) {
-    if (
-      req.user.role === "teacher" &&
-      !(await TeacherAssignmentService.isTeacherAssignedToClass(
-        req.user.id,
-        req.params.classId
-      ))
-    ) {
-      return res.status(403).json({ error: "Accès interdit à cette classe." });
-    }
+  byClass: handle(async (req) => {
+    await assertClassAccess(req.user, req.params.classId);
+    return StudentService.getStudentsByClass(req.params.classId);
+  }),
 
-    const students = await StudentService.getStudentsByClass(req.params.classId);
-    res.json(students);
-  },
+  addParent: handle((req) => StudentService.addParentToStudent(req.params.studentId, req.body?.parentId)),
 
-  async addParent(req, res) {
-    const student = await StudentService.addParentToStudent(
-      req.params.studentId,
-      req.body.parentId
-    );
-    res.json(student);
-  },
+  changeClass: handle((req) => StudentService.changeStudentClass(req.params.studentId, req.body?.classId)),
 
-  async changeClass(req, res) {
-    const student = await StudentService.changeStudentClass(
-      req.params.studentId,
-      req.body.classId
-    );
-    res.json(student);
-  },
+  byParent: handle((req) => StudentService.getStudentsByParent(req.user.id)),
 
-  async byParent(req, res) {
-    const students = await StudentService.getStudentsByParent(req.user.id);
-    res.json(students);
-  },
+  deactivate: handle((req) => StudentService.deactivateStudent(req.params.studentId)),
 
-  async deactivate(req, res) {
-    try {
-      const student = await StudentService.deactivateStudent(req.params.studentId);
-      res.json(student);
-    } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  },
-  async getAll(req, res) {
-    const students = await StudentService.getAllStudents();
-    res.json(students);
-  },
+  getAll: handle((req) => StudentService.getAllStudents(req.query.schoolYearId)),
 
   async importExcel(req, res) {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "Aucun fichier fourni." });
-      }
-      const { classId, schoolYearId } = req.body;
-      
+      if (!req.file) return res.status(400).json({ error: "Aucun fichier fourni." });
+      const { classId, schoolYearId } = req.body || {};
       const result = await StudentService.importStudentsFromExcel(
-        req.file.buffer, 
-        classId, 
-        schoolYearId || req.query.schoolYearId
+        req.file.buffer,
+        classId,
+        schoolYearId || req.query.schoolYearId,
       );
       res.status(200).json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      sendError(res, error);
     }
   },
 };

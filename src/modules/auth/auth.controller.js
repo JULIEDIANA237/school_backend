@@ -1,16 +1,16 @@
 const AuthService = require("./auth.service");
-const mongoose = require("mongoose");
+const { sendError } = require("../../utils/httpError");
 
 /**
- * Enregistrer un nouvel utilisateur
+ * Inscription publique (compte parent uniquement)
  */
 const register = async (req, res) => {
   try {
-    const { email, password, firstName, lastName, phone } = req.body; // pas de role
+    const { email, password, firstName, lastName, phone } = req.body || {}; // pas de role
     const user = await AuthService.register({ email, password, firstName, lastName, phone });
     res.status(201).json({ message: "User registered successfully", user });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    sendError(res, e);
   }
 };
 
@@ -36,12 +36,7 @@ const requestPasswordReset = async (req, res) => {
 
 const resetPassword = async (req, res) => {
   const { token, password } = req.body || {};
-  if (
-    typeof token !== "string" ||
-    token.length !== 64 ||
-    typeof password !== "string" ||
-    password.length < 8
-  ) {
+  if (typeof token !== "string" || token.length !== 64 || typeof password !== "string" || password.length < 8) {
     return res.status(400).json({
       error: "Le lien est invalide ou expiré, ou le mot de passe est trop court (8 caractères minimum).",
     });
@@ -54,6 +49,7 @@ const resetPassword = async (req, res) => {
     if (error.code === "INVALID_RESET_TOKEN") {
       return res.status(400).json({ error: error.message });
     }
+    if (error.status) return sendError(res, error);
     console.error("[AUTH_PASSWORD_RESET_FAILURE]", {
       code: error.code || "PASSWORD_RESET_FAILED",
     });
@@ -61,16 +57,13 @@ const resetPassword = async (req, res) => {
   }
 };
 
-/**
- * Connexion d'un utilisateur
- */
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     const { token, user } = await AuthService.login(email, password);
     res.json({ message: "Login successful", token, user });
   } catch (e) {
-    res.status(401).json({ error: e.message });
+    sendError(res, e, 401);
   }
 };
 

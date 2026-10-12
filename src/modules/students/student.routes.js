@@ -1,44 +1,25 @@
 const express = require("express");
-const multer = require("multer");
 const StudentController = require("./student.controller");
 const { protect } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/role.middleware");
+const { spreadsheetUpload } = require("../../utils/upload");
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const staff = authorize("admin", "secretary");
 
-router.post("/", protect, authorize("admin", "secretary"), StudentController.create);
-router.post("/import", protect, authorize("admin", "secretary"), upload.single("file"), StudentController.importExcel);
-router.get("/", protect, authorize("admin", "secretary"), StudentController.getAll);
-router.put("/:id", protect, authorize("admin", "secretary"), StudentController.update);
+router.use(protect);
 
-router.get(
-  "/class/:classId",
-  protect,
-  authorize("admin", "secretary", "teacher"),
-  StudentController.byClass
-);
-router.get("/parent/me", protect, authorize("parent"), StudentController.byParent);
+router.post("/", staff, StudentController.create);
+router.post("/import", staff, spreadsheetUpload.single("file"), StudentController.importExcel);
+router.get("/", staff, StudentController.getAll);
+router.put("/:id", staff, StudentController.update);
 
-router.post(
-  "/:studentId/parent",
-  protect,
-  authorize("admin", "secretary"),
-  StudentController.addParent
-);
+// Enseignant : uniquement ses classes (vérifié dans le contrôleur)
+router.get("/class/:classId", authorize("admin", "secretary", "teacher"), StudentController.byClass);
+router.get("/parent/me", authorize("parent"), StudentController.byParent);
 
-router.patch(
-  "/:studentId/class",
-  protect,
-  authorize("admin", "secretary"),
-  StudentController.changeClass
-);
-
-router.patch(
-  "/deactivate/:studentId",
-  protect,
-  authorize("admin", "secretary"),
-  StudentController.deactivate
-);
+router.post("/:studentId/parent", staff, StudentController.addParent);
+router.patch("/:studentId/class", staff, StudentController.changeClass);
+router.patch("/deactivate/:studentId", staff, StudentController.deactivate);
 
 module.exports = router;

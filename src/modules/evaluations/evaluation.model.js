@@ -12,7 +12,9 @@ const evaluationSchema = new Schema(
     maxScore: { type: Number, default: 20 },
     coefficient: { type: Number, default: 1 },
     date: { type: Date, default: Date.now },
-    isPublished: { type: Boolean, default: false }
+    isPublished: { type: Boolean, default: false },
+    // Dernier envoi des notes aux parents : une republication ne renvoie que les notes nouvelles ou corrigées
+    parentsNotifiedAt: { type: Date }
   },
   { timestamps: true }
 );

@@ -1,6 +1,7 @@
 const express = require("express");
-const mongoose = require('mongoose');
+const { connectDatabase } = require("./utils/db");
 const cors = require("cors");
+const helmet = require("helmet");
 const authRoutes = require("./modules/auth/auth.routes");
 const classRoutes = require("./modules/classes/class.routes");
 const bulletinRoutes = require("./modules/bulletins/bulletin.routes");
@@ -16,58 +17,51 @@ const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
 const cycleRoutes = require("./modules/cycles/cycle.routes");
 const classSubjectRoutes = require("./modules/classes/classSubject.routes");
 const schoolYearRoutes = require("./modules/schoolYear/schoolYear.routes");
+const { createLimiter } = require("./utils/rateLimit");
+const { notFound, errorHandler } = require("./middlewares/error.middleware");
+const { runDeadlineReminders } = require("./modules/periods/deadlineReminder.service");
+const crypto = require("crypto");
 
 const app = express();
-const allowedOrigins = new Set([
-  process.env.FRONTEND_URL || "http://localhost:8080",
+
+const DEV_ORIGINS = [
+  "http://localhost:8080",
   "http://localhost:4173",
   "http://localhost:4174",
+  "http://127.0.0.1:8080",
   "http://127.0.0.1:4173",
   "http://127.0.0.1:4174",
-]);
+];
 
-const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
+const configuredOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((s) => s.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+const allowedOrigins = new Set(
+  process.env.NODE_ENV === "production" ? configuredOrigins : [...configuredOrigins, ...DEV_ORIGINS]
+);
 
 app.set("trust proxy", 1); // Vercel
+app.disable("x-powered-by");
 app.use(helmet());
 
 app.use(
   cors({
-    origin: (process.env.FRONTEND_URL || "http://localhost:8080").split(",").map((s) => s.trim()),
+    origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
     credentials: true,
   })
 );
 
 app.use(express.json({ limit: "1mb" }));
 
-let connectionPromise;
-
 app.use(async (req, res, next) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      if (!process.env.MONGO_URI) {
-        throw new Error("MONGO_URI environment variable is required");
-      }
-
-      if (!connectionPromise) {
-        connectionPromise = mongoose
-          .connect(process.env.MONGO_URI, {
-            serverSelectionTimeoutMS: 5000,
-            family: 4,
-          })
-          .finally(() => {
-            connectionPromise = undefined;
-          });
-      }
-
-      await connectionPromise;
-    }
-
+    await connectDatabase();
     next();
   } catch (error) {
-    console.error("MongoDB connection failed:", error);
-    res.status(503).json({ message: "Database unavailable" });
+    console.error("MongoDB connection failed:", error.message);
+    res.status(503).json({ error: "Database unavailable" });
   }
 });
 
@@ -80,54 +74,43 @@ app.get("/", (req, res) => {
 
 app.use(
   "/api/auth",
-  rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false }),
+  createLimiter({ name: "auth", windowMs: 15 * 60 * 1000, limit: 30 }),
   authRoutes
 );
 
-// API CLASSES
 app.use("/api/classes", classRoutes);
-
-// API BULLETIN
 app.use("/api/bulletins", bulletinRoutes);
-
-// API EVALUATION
 app.use("/api/evaluations", evaluationRoutes);
-
-// API GRADE
 app.use("/api/grades", gradeRoutes);
-
-// API PERIOD
 app.use("/api/periods", periodRoutes);
-
-// API STUDENT
 app.use("/api/students", studentRoutes);
-
-// API TEACHER
 app.use("/api/teacher", teacherRoutes);
-
-// API SUBJECT
 app.use("/api/subjects", subjectRoutes);
-
-// API NOTIFICATIONS
 app.use("/api/notifications", notificationRoutes);
-
-// API USERS
 app.use("/api/users", userRoutes);
-
-// API ADMIN DASHBOARD
 app.use("/api/admin/dashboard", dashboardRoutes);
-
-// API CYCLES & CLASS SUBJECTS
 app.use("/api/cycles", cycleRoutes);
 app.use("/api/class-subjects", classSubjectRoutes);
 app.use("/api/school-years", schoolYearRoutes);
 
-app.use((req, res) => res.status(404).json({ error: "Route introuvable" }));
-app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === "production" ? "Erreur serveur" : err.message,
-  });
+// Tâche planifiée (vercel.json → crons) : rappels de clôture aux enseignants.
+// Vercel envoie « Authorization: Bearer <CRON_SECRET> » lorsque la variable CRON_SECRET est définie.
+app.get("/api/cron/deadline-reminders", async (req, res, next) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return res.status(503).json({ error: "CRON_SECRET n'est pas configuré." });
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const received = Buffer.from(String(req.headers.authorization || ""));
+  if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
+    return res.status(401).json({ error: "Non autorisé." });
+  }
+  try {
+    res.json({ reminders: await runDeadlineReminders() });
+  } catch (error) {
+    next(error);
+  }
 });
+
+app.use(notFound);
+app.use(errorHandler);
 
 module.exports = app;

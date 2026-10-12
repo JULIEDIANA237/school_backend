@@ -1,32 +1,20 @@
 const SchoolYearService = require("./schoolYear.service");
+const { sendError } = require("../../utils/httpError");
+
+const handle = (fn, successStatus = 200) => async (req, res) => {
+  try {
+    res.status(successStatus).json(await fn(req));
+  } catch (err) {
+    sendError(res, err);
+  }
+};
 
 const SchoolYearController = {
-  async getAll(req, res) {
-    try {
-      const years = await SchoolYearService.getAll();
-      res.json(years);
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  },
-
-  async getCurrent(req, res) {
-    try {
-      const year = await SchoolYearService.getCurrent();
-      res.json(year);
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  },
-
-  async create(req, res) {
-    try {
-      const year = await SchoolYearService.create(req.body);
-      res.status(201).json(year);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
-  }
+  getAll: handle(() => SchoolYearService.getAll()),
+  getCurrent: handle(() => SchoolYearService.getCurrent()),
+  create: handle((req) => SchoolYearService.create(req.body || {}), 201),
+  update: handle((req) => SchoolYearService.update(req.params.id, req.body || {})),
+  setCurrent: handle((req) => SchoolYearService.setCurrent(req.params.id)),
 };
 
 module.exports = SchoolYearController;

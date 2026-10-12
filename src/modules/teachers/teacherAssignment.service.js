@@ -1,241 +1,235 @@
+const mongoose = require("mongoose");
 const TeacherAssignment = require("./teacherAssignment.model");
 const User = require("../users/user.model");
 const Class = require("../classes/class.model");
 const Subject = require("../subjects/subject.model");
 const SchoolYear = require("../schoolYear/schoolYear.model");
-const xlsx = require("xlsx");
+const { loadTeacherMatcher } = require("../users/user.service");
+const { readFirstSheet, createColumnResolver, assertRequiredColumns } = require("../../utils/excel");
+const { compactKey } = require("../../utils/text");
+const { bulkWriteSafe } = require("../../utils/bulk");
+const { loadSubjectLookup } = require("../subjects/subject.service");
+const { isTeacherOfClass } = require("../../utils/access");
+const { httpError } = require("../../utils/httpError");
+
+const QUERY_FIELDS = ["teacherId", "classId", "subjectId", "schoolYearId"];
+
+const resolveSchoolYear = async (schoolYearId) => {
+  if (schoolYearId && mongoose.isValidObjectId(schoolYearId)) {
+    const year = await SchoolYear.findById(schoolYearId);
+    if (year) return year;
+  }
+  return (await SchoolYear.findOne({ isCurrent: true })) || (await SchoolYear.findOne().sort({ name: -1 }));
+};
+
+const ASSIGNMENT_COLUMNS = {
+  className: ["classe", "classes", "class"],
+  subject: ["matiere", "subject", "nom de la matiere", "code matiere", "code", "name", "nom"],
+  teacher: ["professeur", "prof", "teacher", "enseignant", "email enseignant", "email professeur"],
+};
 
 const TeacherAssignmentService = {
-  async assign(data) {
-    return await TeacherAssignment.findOneAndUpdate(
+  /**
+   * Un seul enseignant par classe / matière : l'année est celle de la classe.
+   */
+  async assign(data = {}) {
+    for (const [key, label] of [["teacherId", "Enseignant"], ["classId", "Classe"], ["subjectId", "Matière"]]) {
+      if (!mongoose.isValidObjectId(data[key])) throw httpError(400, `${label} invalide.`);
+    }
+    const [classDoc, teacher, subject] = await Promise.all([
+      Class.findById(data.classId).lean(),
+      User.findOne({ _id: data.teacherId, role: "teacher" }).lean(),
+      Subject.findById(data.subjectId).lean(),
+    ]);
+    if (!classDoc) throw httpError(404, "Classe introuvable.");
+    if (!teacher) throw httpError(404, "Enseignant introuvable.");
+    if (!subject) throw httpError(404, "Matière introuvable.");
+
+    return TeacherAssignment.findOneAndUpdate(
+      { classId: classDoc._id, subjectId: subject._id, schoolYearId: classDoc.schoolYearId },
       {
-        teacherId: data.teacherId,
-        classId: data.classId,
-        subjectId: data.subjectId,
-        schoolYearId: data.schoolYearId,
+        teacherId: teacher._id,
+        classId: classDoc._id,
+        subjectId: subject._id,
+        schoolYearId: classDoc.schoolYearId,
+        isActive: true,
       },
-      data,
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after", runValidators: true }
     );
   },
 
-  async getAssignments(query) {
-    return await TeacherAssignment.find(query)
+  async getAssignments(query = {}) {
+    const filter = {};
+    for (const key of QUERY_FIELDS) {
+      if (query[key] === undefined || query[key] === "") continue;
+      if (!mongoose.isValidObjectId(query[key])) throw httpError(400, `${key} invalide.`);
+      filter[key] = query[key];
+    }
+    return TeacherAssignment.find(filter)
       .populate("teacherId", "firstName lastName")
       .populate("classId", "name")
       .populate("subjectId", "name");
   },
 
   async removeAssignment(id) {
-    return await TeacherAssignment.findByIdAndDelete(id);
+    if (!mongoose.isValidObjectId(id)) throw httpError(400, "Identifiant invalide.");
+    const removed = await TeacherAssignment.findByIdAndDelete(id);
+    if (!removed) throw httpError(404, "Affectation introuvable.");
+    return removed;
   },
 
   async getTeacherClasses(teacherId, schoolYearId) {
     const Student = require("../students/student.model");
-    let currentYear;
-    if (schoolYearId) {
-      currentYear = await SchoolYear.findById(schoolYearId);
-    } else {
-      currentYear = await SchoolYear.findOne({ isCurrent: true });
-      if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-    }
+    const currentYear = await resolveSchoolYear(schoolYearId);
     if (!currentYear) return [];
-    
-    const assignments = await TeacherAssignment.find({ 
-      teacherId, 
-      schoolYearId: currentYear?._id,
-      isActive: true 
-    })
-    .populate("classId")
-    .populate("subjectId");
 
-    // Mapper pour correspondre aux attentes du frontend (classId -> class, subjectId -> subject)
-    // Et s'assurer que le nombre d'élèves est précis
-    return await Promise.all(assignments.map(async (a) => {
-      const obj = a.toObject();
-      const studentsCount = await Student.countDocuments({ class: obj.classId?._id, isActive: true });
-      
-      return {
-        ...obj,
-        class: {
-          ...obj.classId,
-          students: { length: studentsCount } // Pour compatibilité avec item.class?.students?.length
-        },
-        subject: obj.subjectId,
-        studentsCount // Pour compatibilité avec cls.studentsCount
-      };
-    }));
+    const assignments = await TeacherAssignment.find({
+      teacherId,
+      schoolYearId: currentYear._id,
+      isActive: true,
+    })
+      .populate("classId")
+      .populate("subjectId");
+
+    const counts = await Student.aggregate([
+      { $match: { class: { $in: assignments.map((a) => a.classId?._id).filter(Boolean) }, isActive: true } },
+      { $group: { _id: "$class", count: { $sum: 1 } } },
+    ]);
+    const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
+
+    // Forme attendue par l'interface : classId -> class, subjectId -> subject
+    return assignments
+      .filter((a) => a.classId && a.classId.isActive !== false)
+      .map((a) => {
+        const obj = a.toObject();
+        const studentsCount = countMap.get(String(obj.classId._id)) || 0;
+        return {
+          ...obj,
+          class: { ...obj.classId, students: { length: studentsCount } },
+          subject: obj.subjectId,
+          studentsCount,
+        };
+      });
   },
 
+  /** Affectations d'une classe (la classe détermine l'année). */
   async getClassSubjects(classId, teacherId = null) {
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-
-    const query = {
-      classId, 
-      schoolYearId: currentYear?._id,
-      isActive: true 
-    };
+    if (!mongoose.isValidObjectId(classId)) throw httpError(400, "Classe invalide.");
+    const query = { classId, isActive: true };
     if (teacherId) query.teacherId = teacherId;
 
     const assignments = await TeacherAssignment.find(query)
-    .populate("teacherId", "firstName lastName")
-    .populate("subjectId");
+      .populate("teacherId", "firstName lastName")
+      .populate("subjectId");
 
-    return assignments.map(a => {
+    return assignments.map((a) => {
       const obj = a.toObject();
-      return {
-        ...obj,
-        subject: obj.subjectId,
-        teacher: obj.teacherId
-      };
+      return { ...obj, subject: obj.subjectId, teacher: obj.teacherId };
     });
   },
 
   /**
-   * Import des attributions depuis Excel
-   * Colonnes : Classe, Matière, Professeur
+   * Import des attributions depuis Excel. Colonnes : Classe (une ou plusieurs, séparées par , ; |),
+   * Matière (nom ou code), Professeur (email ou « Prénom Nom »).
+   * Seules les classes de l'année visée sont prises en compte.
    */
-  async importAssignmentsFromExcel(fileBuffer) {
-    const workbook = xlsx.read(fileBuffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  async importAssignmentsFromExcel(fileBuffer, schoolYearId) {
+    const rows = readFirstSheet(fileBuffer);
+    const columns = createColumnResolver(rows, ASSIGNMENT_COLUMNS);
+    assertRequiredColumns(columns, ["className", "subject", "teacher"], {
+      className: "Classe",
+      subject: "Matière",
+      teacher: "Professeur",
+    });
 
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) {
-      // Fallback si aucune année n'est explicitement marquée "current"
-      currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
+    const year = await resolveSchoolYear(schoolYearId);
+    if (!year) throw httpError(400, "Aucune année scolaire trouvée dans le système");
+
+    // Ancien index unique { class, subject } d'un modèle abandonné : il bloque les insertions s'il existe encore.
+    try {
+      await TeacherAssignment.collection.dropIndex("class_1_subject_1");
+    } catch {
+      /* index absent */
     }
-    if (!currentYear) throw new Error("Aucune année scolaire trouvée dans le système");
 
-    // Fix: Dropping old unused index if it exists, to fix duplication error { class: null, subject: null }
-    try { await TeacherAssignment.collection.dropIndex("class_1_subject_1"); } catch(e) {}
+    const [yearClasses, matchTeacher, findSubject] = await Promise.all([
+      Class.find({ schoolYearId: year._id }).lean(),
+      loadTeacherMatcher(),
+      loadSubjectLookup(),
+    ]);
+    const result = { totalRows: rows.length, created: 0, errors: [], schoolYear: year.name };
+    const pending = new Map(); // classe + matière -> { line, op } : la dernière ligne l'emporte
 
-    // Pre-récupérer toutes les classes pour ignorer les accents et les espaces
-    const allClasses = await Class.find({});
-    const normalize = (str) => {
-      if (!str) return "";
-      return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "").toLowerCase();
-    };
-
-    const result = {
-      totalRows: data.length,
-      created: 0,
-      errors: []
-    };
-
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const line = `Ligne ${i + 2}`;
       try {
-        // Fonction helper pour ignorer la casse des en-têtes
-        const getVal = (rowObj, ...keys) => {
-          const rowKeys = Object.keys(rowObj);
-          const match = rowKeys.find(rk => keys.some(k => rk.toLowerCase().trim() === k.toLowerCase().trim()));
-          return match ? rowObj[match] : undefined;
-        };
-
-        const classInput = getVal(row, "classe", "classes");
-        const subjectName = getVal(row, "matiere", "matière", "name", "nom");
-        const teacherInput = getVal(row, "professeur", "prof", "teacher", "enseignant");
-
+        const classInput = columns.get(row, "className");
+        const subjectName = columns.get(row, "subject");
+        const teacherInput = columns.get(row, "teacher");
+        if (!classInput && !subjectName && !teacherInput) continue;
         if (!classInput || !subjectName || !teacherInput) {
           throw new Error("Toutes les colonnes (Classe, Matière, Professeur) sont requises");
         }
 
-        const classNames = classInput.toString().split(/[,;\|]+/).map(c => c.trim()).filter(Boolean);
+        const subjectObj = findSubject(subjectName);
+        if (!subjectObj) throw new Error(`Matière « ${subjectName} » non trouvée`);
 
-        // 1. Trouver la matière
-        const subjectObj = await Subject.findOne({ 
-          $or: [
-            { name: { $regex: new RegExp(`^${subjectName.toString().trim()}$`, 'i') } },
-            { code: subjectName.toString().trim().toUpperCase() }
-          ]
-        });
-        if (!subjectObj) throw new Error(`Matière "${subjectName}" non trouvée`);
-
-        // 2. Trouver le professeur
-        const input = teacherInput.toString().trim();
-        let teacher = await User.findOne({ 
-          email: { $regex: new RegExp(`^${input}$`, 'i') }, 
-          role: 'teacher' 
-        });
-
+        const { teacher, ambiguous } = matchTeacher(teacherInput);
         if (!teacher) {
-          const searchTerms = input.split(/\s+/).filter(t => t.length > 0);
-          if (searchTerms.length >= 2) {
-            const regexTerms = searchTerms.map(term => new RegExp(term, 'i'));
-            teacher = await User.findOne({
-              $or: [{ firstName: { $all: regexTerms } }, { lastName: { $all: regexTerms } }],
-              role: 'teacher'
-            });
-          }
+          throw new Error(
+            ambiguous
+              ? `Plusieurs enseignants s'appellent « ${teacherInput} » : utilisez son email`
+              : `Professeur « ${teacherInput} » non trouvé`,
+          );
         }
-        if (!teacher) throw new Error(`Professeur "${teacherInput}" non trouvé`);
 
-        // 3. Boucler sur chaque classe pour créer les attributions
+        const classNames = String(classInput).split(/[,;|]+/).map((c) => c.trim()).filter(Boolean);
         for (const className of classNames) {
-          const normTarget = normalize(className);
-          const classObj = allClasses.find(c => normalize(c.name) === normTarget);
-          
+          const classObj = yearClasses.find((c) => compactKey(c.name) === compactKey(className));
           if (!classObj) {
-            result.errors.push(`Ligne ${i + 2}: Classe "${className}" non trouvée. Ignorée.`);
+            result.errors.push(`${line}: Classe « ${className} » non trouvée pour ${year.name}. Ignorée.`);
             continue;
           }
-
-          // Créer l'attribution
-          await TeacherAssignment.findOneAndUpdate(
-            {
-              classId: classObj._id,
-              subjectId: subjectObj._id,
-              schoolYearId: currentYear._id
-            },
-            {
-              teacherId: teacher._id,
-              classId: classObj._id,
-              subjectId: subjectObj._id,
-              schoolYearId: currentYear._id,
-              isActive: true
-            },
-            { upsert: true, new: true }
-          );
-
-          result.created++;
+          const filter = { classId: classObj._id, subjectId: subjectObj._id, schoolYearId: year._id };
+          pending.set(`${classObj._id}:${subjectObj._id}`, {
+            line,
+            op: { updateOne: { filter, update: { $set: { ...filter, teacherId: teacher._id, isActive: true } }, upsert: true } },
+          });
         }
       } catch (err) {
-        result.errors.push(`Ligne ${i + 2}: ${err.message}`);
+        result.errors.push(`${line}: ${err.message}`);
       }
     }
 
+    const entries = [...pending.values()];
+    const failed = await bulkWriteSafe(TeacherAssignment, entries.map((e) => e.op));
+    failed.forEach((f) => result.errors.push(`${entries[f.index].line}: ${f.message}`));
+    result.created = entries.length - failed.length;
     return result;
   },
 
-  async isTeacherAssigned(teacherId, classId, subjectId) {
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-
-    const assignment = await TeacherAssignment.findOne({
-      teacherId,
-      classId,
-      subjectId,
-      schoolYearId: currentYear?._id,
-      isActive: true
-    });
-
-    return !!assignment;
+  /**
+   * Tableau de bord enseignant en une requête : ses classes de l'année et ses évaluations
+   * de la période active, chargées en parallèle.
+   */
+  async getTeacherDashboard(teacherId, schoolYearId) {
+    const { getTeacherEvaluations } = require("../evaluations/evaluation.service");
+    const [classes, evaluations] = await Promise.all([
+      this.getTeacherClasses(teacherId, schoolYearId),
+      getTeacherEvaluations(teacherId),
+    ]);
+    const classIds = new Set(classes.map((a) => String(a.class?._id)));
+    return { classes, evaluations: evaluations.filter((e) => classIds.has(String(e.class?._id ?? e.class))) };
   },
 
-  async isTeacherAssignedToClass(teacherId, classId) {
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-    if (!currentYear) return false;
+  isTeacherAssigned(teacherId, classId, subjectId) {
+    return isTeacherOfClass(teacherId, classId, { subjectId });
+  },
 
-    return !!(await TeacherAssignment.exists({
-      teacherId,
-      classId,
-      schoolYearId: currentYear._id,
-      isActive: true
-    }));
-  }
+  isTeacherAssignedToClass(teacherId, classId) {
+    return isTeacherOfClass(teacherId, classId);
+  },
 };
 
 module.exports = TeacherAssignmentService;

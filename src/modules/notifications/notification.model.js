@@ -5,6 +5,7 @@ const notificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true,
+    index: true,
   },
   title: {
     type: String,
@@ -18,6 +19,10 @@ const notificationSchema = new mongoose.Schema({
     type: String,
     enum: ["INFO", "SUCCESS", "WARNING", "ERROR"],
     default: "INFO",
+  },
+  // Lien interne de l'application (ex : /parent/bulletins/<id>)
+  link: {
+    type: String,
   },
   isRead: {
     type: Boolean,
