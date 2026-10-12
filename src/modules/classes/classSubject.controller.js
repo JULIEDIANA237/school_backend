@@ -1,36 +1,32 @@
 const ClassSubjectService = require("./classSubject.service");
+const { sendError } = require("../../utils/httpError");
 
 const ClassSubjectController = {
   async importCoefficients(req, res) {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "Aucun fichier fourni." });
-      }
-      const result = await ClassSubjectService.importCoefficientsFromExcel(req.file.buffer);
+      if (!req.file) return res.status(400).json({ error: "Aucun fichier fourni." });
+      const result = await ClassSubjectService.importCoefficientsFromExcel(req.file.buffer, req.body?.schoolYearId);
       res.status(200).json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      sendError(res, error);
     }
   },
 
   async getByClass(req, res) {
     try {
-      const { schoolYearId } = req.query;
-      const subjects = await ClassSubjectService.getClassSubjects(req.params.classId, schoolYearId);
-      res.json(subjects);
+      res.json(await ClassSubjectService.getClassSubjects(req.params.classId, req.query.schoolYearId));
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      sendError(res, error);
     }
   },
 
   async assign(req, res) {
     try {
-      const assignment = await ClassSubjectService.assignSubjectToClass(req.body);
-      res.json(assignment);
+      res.json(await ClassSubjectService.assignSubjectToClass(req.body || {}));
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      sendError(res, error);
     }
-  }
+  },
 };
 
 module.exports = ClassSubjectController;

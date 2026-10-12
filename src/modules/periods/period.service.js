@@ -1,199 +1,227 @@
+const mongoose = require("mongoose");
 const Period = require("./period.model");
 const SchoolYear = require("../schoolYear/schoolYear.model");
 const Evaluation = require("../evaluations/evaluation.model");
 const Bulletin = require("../bulletins/bulletin.model");
+const { httpError } = require("../../utils/httpError");
 
-// Créer une période
-const createPeriod = async (data) => {
-  const startDate = new Date(data.startDate);
-  const endDate = new Date(data.endDate);
+const PERIOD_FIELDS = ["name", "type", "year", "startDate", "endDate", "parentPeriod"];
 
-  if (startDate >= endDate) {
-    throw new Error("Invalid period dates");
+const pickFields = (data = {}) =>
+  Object.fromEntries(PERIOD_FIELDS.filter((k) => data[k] !== undefined).map((k) => [k, data[k]]));
+
+const toDate = (value, label) => {
+  const date = new Date(value);
+  if (!value || isNaN(date.getTime())) throw httpError(400, `${label} invalide.`);
+  return date;
+};
+
+/**
+ * Valide une période complète (création ou état fusionné d'une mise à jour).
+ * Règles : année scolaire existante, dates cohérentes, séquence rattachée à un
+ * trimestre de la même année et comprise dans ses dates, pas de chevauchement.
+ */
+const validatePeriod = async (data, currentId = null) => {
+  const name = String(data.name || "").trim();
+  if (!name) throw httpError(400, "Le nom de la période est requis.");
+  if (!["TRIMESTRE", "SEQUENCE"].includes(data.type)) throw httpError(400, "Type de période invalide.");
+  const year = String(data.year || "").trim();
+  if (!year) throw httpError(400, "L'année scolaire est requise.");
+  if (!(await SchoolYear.exists({ name: year }))) {
+    throw httpError(400, `Année scolaire « ${year} » inconnue. Créez-la d'abord dans « Années scolaires ».`);
   }
 
-  // Si c'est une Séquence, vérifier qu'elle est dans le Trimestre parent
-  if (data.type === "SEQUENCE" && data.parentPeriod) {
-    const parent = await Period.findById(data.parentPeriod);
-    if (!parent) {
-      throw new Error("Parent period not found");
-    }
+  const startDate = toDate(data.startDate, "Date de début");
+  const endDate = toDate(data.endDate, "Date de fin");
+  if (startDate >= endDate) throw httpError(400, "La date de début doit être avant la date de fin.");
 
-    if (startDate < new Date(parent.startDate) || endDate > new Date(parent.endDate)) {
-      throw new Error("Sequence dates must be within parent trimester dates");
+  let parentPeriod = null;
+  if (data.type === "SEQUENCE") {
+    if (!data.parentPeriod || !mongoose.isValidObjectId(data.parentPeriod)) {
+      throw httpError(400, "Une séquence doit être rattachée à un trimestre.");
+    }
+    const parent = await Period.findById(data.parentPeriod).lean();
+    if (!parent || parent.type !== "TRIMESTRE") throw httpError(400, "Le trimestre parent est introuvable.");
+    if (parent.year !== year) {
+      throw httpError(400, "Le trimestre parent doit appartenir à la même année scolaire.");
+    }
+    if (startDate < parent.startDate || endDate > parent.endDate) {
+      throw httpError(400, "Les dates de la séquence doivent être comprises dans celles du trimestre.");
+    }
+    parentPeriod = parent._id;
+  } else if (currentId) {
+    const outside = await Period.findOne({
+      parentPeriod: currentId,
+      $or: [{ startDate: { $lt: startDate } }, { endDate: { $gt: endDate } }],
+    }).lean();
+    if (outside) {
+      throw httpError(400, `La séquence « ${outside.name} » sortirait des nouvelles dates du trimestre.`);
     }
   }
 
-  // Vérifier chevauchement sur la même année ET LE MÊME TYPE
   const overlap = await Period.findOne({
-    year: data.year,
+    ...(currentId ? { _id: { $ne: currentId } } : {}),
+    year,
     type: data.type,
     startDate: { $lt: endDate },
-    endDate: { $gt: startDate }
-  });
+    endDate: { $gt: startDate },
+  }).lean();
+  if (overlap) throw httpError(400, `Ces dates chevauchent la période « ${overlap.name} ».`);
 
-  if (overlap) {
-    throw new Error(`Period dates overlap with existing period: "${overlap.name}"`);
-  }
-
-  return await Period.create(data);
+  return { name, type: data.type, year, startDate, endDate, parentPeriod };
 };
 
-// Mettre à jour une période
-const updatePeriod = async (periodId, data) => {
-  const startDate = data.startDate ? new Date(data.startDate) : null;
-  const endDate = data.endDate ? new Date(data.endDate) : null;
-
-  if (startDate && endDate && startDate >= endDate) {
-    throw new Error("La date de début doit être avant la date de fin");
-  }
-
-  // Vérifier chevauchement (en excluant la période actuelle)
-  if (startDate && endDate) {
-    const overlap = await Period.findOne({
-      _id: { $ne: periodId },
-      year: data.year,
-      type: data.type,
-      startDate: { $lt: endDate },
-      endDate: { $gt: startDate }
-    });
-
-    if (overlap) {
-      throw new Error(`Ces dates chevauchent une autre période : "${overlap.name}"`);
-    }
-  }
-
-  return await Period.findByIdAndUpdate(periodId, data, { new: true, runValidators: true });
-};
-
-// Activer une période (UNE SEULE active par année)
-const activatePeriod = async (periodId) => {
-  const period = await Period.findById(periodId);
-  if (!period) {
-    throw new Error("Period not found");
-  }
-
-  // Désactiver seulement les périodes du même type pour cette année
-  await Period.updateMany(
-    { year: period.year, type: period.type },
-    { isActive: false }
+const isPeriodUsed = async (periodId) =>
+  !!(
+    (await Evaluation.exists({ period: periodId })) ||
+    (await Bulletin.exists({ period: periodId })) ||
+    (await Period.exists({ parentPeriod: periodId }))
   );
 
-  // Si c'est une SÉQUENCE et qu'elle a un parent, s'assurer que le parent est actif aussi
-  if (period.type === "SEQUENCE" && period.parentPeriod) {
-    await Period.findByIdAndUpdate(period.parentPeriod, { isActive: true });
-  }
+const createPeriod = async (data) => Period.create(await validatePeriod(pickFields(data)));
 
-  period.isActive = true;
-  await period.save();
+const updatePeriod = async (periodId, data) => {
+  const existing = await Period.findById(periodId).lean();
+  if (!existing) throw httpError(404, "Période introuvable.");
 
-  return period;
-};
-
-// Toggle activation (désactive les autres si on active celle-ci)
-const toggleActivation = async (periodId) => {
-  const period = await Period.findById(periodId);
-  if (!period) throw new Error("Period not found");
-
-  const newState = !period.isActive;
-
-  if (newState) {
-    // Désactiver seulement les périodes du même type
-    await Period.updateMany(
-      { year: period.year, type: period.type }, 
-      { isActive: false }
-    );
-    
-    // Si c'est une SÉQUENCE et qu'elle a un parent, auto-activer le parent
-    if (period.type === "SEQUENCE" && period.parentPeriod) {
-      await Period.findByIdAndUpdate(period.parentPeriod, { isActive: true });
+  const changes = pickFields(data);
+  const merged = { ...existing, ...changes };
+  if ((changes.type && changes.type !== existing.type) || (changes.year && changes.year !== existing.year)) {
+    if (await isPeriodUsed(periodId)) {
+      throw httpError(409, "Impossible de changer le type ou l'année d'une période déjà utilisée.");
     }
   }
 
-  period.isActive = newState;
+  const validated = await validatePeriod(merged, periodId);
+  if (changes.endDate && new Date(changes.endDate).getTime() !== new Date(existing.endDate).getTime()) {
+    validated.deadlineReminders = []; // nouvelle date de clôture : les rappels aux enseignants repartent de zéro
+  }
+  return Period.findByIdAndUpdate(periodId, validated, { returnDocument: "after", runValidators: true });
+};
+
+/** Vrai si la période, ou son trimestre parent, est clôturée. */
+const isPeriodLocked = async (periodOrId) => {
+  const period =
+    periodOrId && typeof periodOrId === "object" && "isClosed" in periodOrId
+      ? periodOrId
+      : await Period.findById(periodOrId).select("isClosed parentPeriod").lean();
+  if (!period) return false;
+  if (period.isClosed) return true;
+  if (!period.parentPeriod) return false;
+  const parentId = period.parentPeriod._id || period.parentPeriod;
+  return !!(await Period.exists({ _id: parentId, isClosed: true }));
+};
+
+const assertPeriodOpen = async (periodOrId) => {
+  if (await isPeriodLocked(periodOrId)) {
+    throw httpError(
+      409,
+      "Cette période est clôturée : les notes et les évaluations ne peuvent plus être modifiées.",
+      "PERIOD_CLOSED",
+    );
+  }
+};
+
+const setClosure = async (periodId, isClosed) => {
+  const period = await Period.findByIdAndUpdate(periodId, { isClosed: !!isClosed }, { returnDocument: "after" });
+  if (!period) throw httpError(404, "Période introuvable.");
+  return period;
+};
+
+/**
+ * Active/désactive une période. Une seule séquence et un seul trimestre actifs à la fois ;
+ * activer une séquence active son trimestre, activer un trimestre désactive les séquences
+ * des autres trimestres.
+ */
+const toggleActivation = async (periodId) => {
+  const period = await Period.findById(periodId);
+  if (!period) throw httpError(404, "Période introuvable.");
+
+  const activate = !period.isActive;
+  if (activate) {
+    if (period.type === "SEQUENCE") {
+      await Period.updateMany({ type: "SEQUENCE", _id: { $ne: period._id } }, { isActive: false });
+      if (period.parentPeriod) {
+        await Period.updateMany({ type: "TRIMESTRE", _id: { $ne: period.parentPeriod } }, { isActive: false });
+        await Period.updateOne({ _id: period.parentPeriod }, { isActive: true });
+      }
+    } else {
+      await Period.updateMany({ type: "TRIMESTRE", _id: { $ne: period._id } }, { isActive: false });
+      await Period.updateMany(
+        { type: "SEQUENCE", isActive: true, parentPeriod: { $ne: period._id } },
+        { isActive: false },
+      );
+    }
+  } else if (period.type === "TRIMESTRE") {
+    await Period.updateMany({ parentPeriod: period._id }, { isActive: false });
+  }
+
+  period.isActive = activate;
   await period.save();
-
   return period;
 };
 
-// Récupérer la période active globale
+/** Période active de référence : la séquence active, sinon le trimestre actif. */
+const findActivePeriod = async () =>
+  (await Period.findOne({ isActive: true, type: "SEQUENCE" }).sort({ startDate: -1 })) ||
+  (await Period.findOne({ isActive: true, type: "TRIMESTRE" }).sort({ startDate: -1 }));
+
 const getActivePeriod = async () => {
-  const period = await Period.findOne({ isActive: true });
-  if (!period) {
-    throw new Error("No active period found");
-  }
+  const period = await findActivePeriod();
+  if (!period) throw httpError(404, "Aucune période active.");
   return period;
 };
 
-// Récupérer l’année active
+const findCurrentSchoolYear = async () =>
+  (await SchoolYear.findOne({ isCurrent: true })) || (await SchoolYear.findOne().sort({ name: -1 }));
+
 const getActiveYear = async () => {
-  try {
-    const period = await getActivePeriod();
-    return period.year;
-  } catch (e) {
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-    if (!currentYear) throw new Error("No school year found");
-    return currentYear.name;
-  }
+  const currentYear = await SchoolYear.findOne({ isCurrent: true });
+  if (currentYear) return currentYear.name;
+  const active = await findActivePeriod();
+  if (active) return active.year;
+  const latest = await SchoolYear.findOne().sort({ name: -1 });
+  if (!latest) throw httpError(404, "Aucune année scolaire.");
+  return latest.name;
 };
 
-// Liste des périodes par année
 const getPeriodsByYear = async (year) => {
-  if (!year) throw new Error("Year is required");
-  return await Period.find({ year }).sort({ startDate: 1 });
+  if (!year) throw httpError(400, "Année requise.");
+  return Period.find({ year }).sort({ startDate: 1 });
 };
 
-// Supprimer une période
 const deletePeriod = async (periodId) => {
-  const used =
-    (await Evaluation.exists({ period: periodId })) ||
-    (await Bulletin.exists({ period: periodId }));
-
-  if (used) {
-    throw new Error("Cannot delete a used period");
+  if (await isPeriodUsed(periodId)) {
+    throw httpError(409, "Impossible de supprimer une période utilisée (évaluations, bulletins ou séquences rattachées).");
   }
-
-  return await Period.findByIdAndDelete(periodId);
+  const deleted = await Period.findByIdAndDelete(periodId);
+  if (!deleted) throw httpError(404, "Période introuvable.");
+  return deleted;
 };
 
 const getPeriodsByActiveYear = async () => {
-  let year = null;
-  
-  // 1. Essayer de trouver une période active
   try {
-    const activePeriod = await Period.findOne({ isActive: true });
-    if (activePeriod) year = activePeriod.year;
-  } catch (e) {}
-
-  // 2. Fallback sur l'année scolaire marquée "isCurrent"
-  if (!year) {
-    let currentYear = await SchoolYear.findOne({ isCurrent: true });
-    if (!currentYear) {
-      currentYear = await SchoolYear.findOne().sort({ createdAt: -1 });
-    }
-    if (currentYear) year = currentYear.name;
+    return await getPeriodsByYear(await getActiveYear());
+  } catch {
+    return [];
   }
-
-  if (!year) return [];
-
-  return await getPeriodsByYear(year);
 };
 
-// Récupérer toutes les périodes confondues
-const getAllPeriods = async () => {
-  return await Period.find().sort({ year: -1, startDate: 1 });
-};
+const getAllPeriods = async () => Period.find().sort({ year: -1, startDate: 1 });
 
 module.exports = {
   getAllPeriods,
   createPeriod,
-  activatePeriod,
-  getActivePeriod,
-  getActiveYear,
-  getPeriodsByYear,
-  getPeriodsByActiveYear,
+  updatePeriod,
   deletePeriod,
   toggleActivation,
-  updatePeriod
+  setClosure,
+  isPeriodLocked,
+  assertPeriodOpen,
+  findActivePeriod,
+  getActivePeriod,
+  getActiveYear,
+  findCurrentSchoolYear,
+  getPeriodsByYear,
+  getPeriodsByActiveYear,
 };

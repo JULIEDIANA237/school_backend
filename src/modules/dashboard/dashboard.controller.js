@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Student = require("../students/student.model");
 const User = require("../users/user.model");
 const Class = require("../classes/class.model");
@@ -5,80 +6,79 @@ const Evaluation = require("../evaluations/evaluation.model");
 const Bulletin = require("../bulletins/bulletin.model");
 const Notification = require("../notifications/notification.model");
 const Period = require("../periods/period.model");
+const { sendError } = require("../../utils/httpError");
 
+/**
+ * Statistiques d'administration. `year` = identifiant de l'année scolaire sélectionnée
+ * (toutes les années si absent).
+ */
 const getAdminStats = async (req, res) => {
   try {
     const { year } = req.query;
-    const filter = year ? { year } : {};
+    const classFilter = { isActive: true };
+    if (year) {
+      if (!mongoose.isValidObjectId(year)) return res.status(400).json({ error: "Année scolaire invalide." });
+      classFilter.schoolYearId = year;
+    }
 
-    const [
-      studentsCount, 
-      teachersCount, 
-      classesCount,
-      pendingEvaluations,
-      draftBulletins,
-      recentActivities,
-      allClasses
-    ] = await Promise.all([
-      Student.countDocuments({ isActive: true }),
-      User.countDocuments({ role: "teacher" }),
-      Class.countDocuments({ isActive: true }),
-      Evaluation.countDocuments({ isPublished: false }),
-      Bulletin.countDocuments({ isPublished: false }),
-      Notification.find().sort({ createdAt: -1 }).limit(5),
-      Class.find({ isActive: true })
-    ]);
+    const classes = await Class.find(classFilter).select("_id level").lean();
+    const classIds = classes.map((c) => c._id);
+    const byClass = year ? { class: { $in: classIds } } : {};
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
-    // Calculate unique levels
-    const levels = new Set(allClasses.map(c => c.level)).size;
+    // Notifications du personnel uniquement : celles des parents contiennent les résultats des élèves.
+    const staffIds = await User.distinct("_id", { role: { $in: ["admin", "secretary", "teacher"] } });
 
-    const pendingActionsList = [];
+    const [studentsCount, newStudents, teachersCount, pendingEvaluations, draftBulletins, bulletins, recentActivities] =
+      await Promise.all([
+        Student.countDocuments({ isActive: true, ...byClass }),
+        Student.countDocuments({ isActive: true, createdAt: { $gte: startOfMonth }, ...byClass }),
+        User.countDocuments({ role: "teacher" }),
+        Evaluation.countDocuments({ isPublished: false, ...byClass }),
+        Bulletin.countDocuments({ isPublished: false, ...byClass }),
+        Bulletin.find(byClass).select("generalAverage").lean(),
+        Notification.find({ user: { $in: staffIds } }).sort({ createdAt: -1 }).limit(5).lean(),
+      ]);
+
+    const classified = bulletins.filter((b) => b.generalAverage !== null && b.generalAverage !== undefined);
+    const successRate = classified.length
+      ? Math.round((classified.filter((b) => b.generalAverage >= 10).length / classified.length) * 1000) / 10
+      : 0;
+
+    const pendingActions = [];
     if (pendingEvaluations > 0) {
-      pendingActionsList.push({ 
-        id: 'evals', 
-        title: `${pendingEvaluations} évaluation(s) non publiée(s)`, 
-        urgency: 'medium',
-        link: '/teacher/evaluations'
+      pendingActions.push({
+        id: "evals",
+        title: `${pendingEvaluations} évaluation(s) non publiée(s) par les enseignants`,
+        urgency: "medium",
+        link: "/admin/bulletins",
       });
     }
     if (draftBulletins > 0) {
-      pendingActionsList.push({ 
-        id: 'bulletins', 
-        title: `${draftBulletins} bulletin(s) en attente de validation`, 
-        urgency: 'high',
-        link: '/admin/bulletins'
+      pendingActions.push({
+        id: "bulletins",
+        title: `${draftBulletins} bulletin(s) en attente de validation`,
+        urgency: "high",
+        link: "/admin/bulletins",
       });
     }
 
     res.json({
-      students: {
-        total: studentsCount,
-        newThisMonth: 0, // Could be calculated if we add createdAt to students
-        trend: 0
-      },
-      teachers: {
-        total: teachersCount,
-        active: teachersCount
-      },
-      classes: {
-        total: classesCount,
-        levels: levels
-      },
-      successRate: {
-        value: 0, // Complex calculation from grades
-        trend: 0
-      },
-      pendingActions: pendingActionsList,
-      recentActivities: recentActivities.map(n => ({
+      students: { total: studentsCount, newThisMonth: newStudents, trend: 0 },
+      teachers: { total: teachersCount, active: teachersCount },
+      classes: { total: classes.length, levels: new Set(classes.map((c) => c.level)).size },
+      successRate: { value: successRate, trend: 0 },
+      pendingActions,
+      recentActivities: recentActivities.map((n) => ({
         id: n._id,
         action: n.title,
-        user: n.message.split(' par ')[1] || 'Système',
+        user: n.message,
         time: n.createdAt,
-        type: n.type.toLowerCase() === 'success' ? 'success' : 'info'
-      }))
+        type: n.type === "SUCCESS" ? "success" : "info",
+      })),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 500);
   }
 };
 
@@ -87,11 +87,11 @@ const getAvailableYears = async (req, res) => {
     const years = await Period.distinct("year");
     res.json(years.sort().reverse());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err, 500);
   }
 };
 
 module.exports = {
   getAdminStats,
-  getAvailableYears
+  getAvailableYears,
 };

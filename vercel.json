@@ -1,6 +1,15 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index.js" }
+    {
+      "source": "/(.*)",
+      "destination": "/api/index.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/deadline-reminders",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

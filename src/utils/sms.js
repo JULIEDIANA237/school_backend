@@ -2,7 +2,14 @@
  * Service d'envoi de SMS (Place-holder)
  * A remplacer par un vrai provider (Twilio, Vonage, SMS.to, etc.)
  */
+const { isDryRun } = require("./mail");
+
 const sendSMS = async ({ to, message }) => {
+  if (isDryRun()) {
+    console.log("[SMS_DRY_RUN] Envoi désactivé (MESSAGES_DRY_RUN), SMS non envoyé.");
+    return { success: true, provider: "dry-run" };
+  }
+
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_FROM_NUMBER;
@@ -19,20 +26,14 @@ const sendSMS = async ({ to, message }) => {
         from: from,
         to: to
       });
-      console.log(`   📱 SMS [TWILIO] envoyé à ${to}: ${response.sid}`);
       return { success: true, provider: "Twilio", sid: response.sid };
     } else {
-      // Simulation d'envoi SMS (pas de credentials Twilio valides)
-      console.log(`   📱 SMS [SIMULATION] à ${to}: ${message}`);
-      if (sid && !sid.startsWith("AC")) {
-        console.log(`   ⚠️  TWILIO_ACCOUNT_SID doit commencer par 'AC'. Configurez un vrai compte sur twilio.com`);
-      } else {
-        console.log(`   ⚠️  Pour de vrais SMS, configurez TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER dans le .env`);
-      }
+      // Simulation d'envoi SMS (pas de credentials Twilio valides) — ni numéro ni contenu dans les logs
+      console.log("[SMS_SIMULATION] Twilio non configuré (TWILIO_ACCOUNT_SID doit commencer par 'AC'), SMS non envoyé.");
       return { success: true, provider: "EduFlow-Mock" };
     }
   } catch (error) {
-    console.error("   ❌ Erreur d'envoi SMS:", error.message);
+    console.error("[SMS_SEND_FAILURE]", error.message);
     return { success: false, error: error.message };
   }
 };

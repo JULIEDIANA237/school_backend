@@ -1,341 +1,243 @@
+const mongoose = require("mongoose");
 const Grade = require("./grade.model");
 const Evaluation = require("../evaluations/evaluation.model");
 const Student = require("../students/student.model");
-const BulletinService = require("../bulletins/bulletin.service"); // To re-use calculateBulletin logic for the student
+const Period = require("../periods/period.model");
+const BulletinService = require("../bulletins/bulletin.service");
+const calc = require("../bulletins/bulletin.calculator");
+const { assertPeriodOpen } = require("../periods/period.service");
+const {
+  isTeacherOfClass,
+  isPrincipalTeacher,
+  assertClassAccess,
+  assertStudentAccess,
+} = require("../../utils/access");
+const { httpError } = require("../../utils/httpError");
+
+const idOf = (value) => String(value?._id ?? value);
 
 /**
- * Convertit une note en appréciation sur 20
- * @param {number} score - note obtenue
- * @param {number} maxScore - note maximale possible (par défaut 20)
- * @returns {string} appréciation
+ * Convertit une note en appréciation (barème ramené sur 20)
  */
 function getAppreciation(score, maxScore = 20) {
-  const normalized = (score / maxScore) * 20; // normalisé sur 20
+  const normalized = (score / maxScore) * 20;
   if (normalized >= 16) return "Expert";
   if (normalized >= 14) return "Acquis";
   if (normalized >= 10) return "En cours d'acquisition";
   return "Non acquis";
 }
 
-/**
- * Crée ou met à jour une note avec appréciation
- * @param {Object} params
- * @param {string} params.studentId
- * @param {string} params.evaluationId
- * @param {number} params.score
- * @param {string} params.teacherId
- * @returns {Promise<Object>} grade
- */
-const upsertGrade = async ({ studentId, evaluationId, score, teacherId }) => {
-  // Vérifier élève
-  const student = await Student.findById(studentId);
-  if (!student) throw new Error("Student not found");
-
-  // Vérifier évaluation
-  const evaluation = await Evaluation.findById(evaluationId);
-  if (!evaluation) throw new Error("Evaluation not found");
-
-  // Sécurité pédagogique
-  if (evaluation.teacher.toString() !== teacherId.toString()) {
-    throw new Error("Teacher not allowed to grade this evaluation");
-  }
-
-  // Vérifier score
-  if (score < 0 || score > evaluation.maxScore) {
-    throw new Error("Invalid score");
-  }
-
-  // Calcul appréciation
-  const appreciation = getAppreciation(score, evaluation.maxScore);
-
-  // Upsert note
-  const grade = await Grade.findOneAndUpdate(
-    { student: studentId, evaluation: evaluationId },
-    {
-      score,
-      comment: appreciation // <-- Correction fondamentale
-    },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
-  );
-  return grade;
+const assertObjectId = (value, label) => {
+  if (!mongoose.isValidObjectId(value)) throw httpError(400, `${label} invalide.`);
 };
 
-// Récupérer les notes d'un élève pour une période
-const getGradesByStudent = async (studentId, periodId) => {
+/** Une séquence, ou un trimestre et ses séquences. */
+const periodIdsFor = async (periodId) => {
+  assertObjectId(periodId, "Identifiant de période");
+  const period = await Period.findById(periodId).select("type").lean();
+  if (!period) throw httpError(404, "Période introuvable.");
+  if (period.type !== "TRIMESTRE") return [period._id];
+  const children = await Period.find({ parentPeriod: periodId }).select("_id").lean();
+  return [period._id, ...children.map((c) => c._id)];
+};
+
+/** Un enseignant non principal ne voit que ses propres évaluations dans une classe. */
+const teacherEvaluationFilter = async (user, classId) => {
+  if (user.role !== "teacher") return {};
+  return (await isPrincipalTeacher(user.id, classId)) ? {} : { teacher: user.id };
+};
+
+const parseScore = (score, maxScore) => {
+  const value =
+    typeof score === "number" ? score : typeof score === "string" && score.trim() !== "" ? Number(score.replace(",", ".")) : NaN;
+  if (!Number.isFinite(value) || value < 0 || value > maxScore) {
+    throw httpError(400, `Note invalide : elle doit être comprise entre 0 et ${maxScore}.`);
+  }
+  return Math.round(value * 100) / 100;
+};
+
+/**
+ * Crée ou met à jour une note.
+ * - Enseignant : uniquement ses évaluations, et seulement s'il est toujours affecté à la classe/matière.
+ * - Période (ou trimestre parent) clôturée : refus.
+ * - L'élève doit être inscrit et actif dans la classe de l'évaluation.
+ */
+const upsertGrade = async ({ studentId, evaluationId, score, comment, user }) => {
+  assertObjectId(studentId, "Identifiant d'élève");
+  assertObjectId(evaluationId, "Identifiant d'évaluation");
+
+  const evaluation = await Evaluation.findById(evaluationId).populate("period", "isClosed parentPeriod").lean();
+  if (!evaluation) throw httpError(404, "Évaluation introuvable.");
+
+  if (user.role === "teacher") {
+    if (idOf(evaluation.teacher) !== user.id) {
+      throw httpError(403, "Vous ne pouvez noter que vos propres évaluations.");
+    }
+    if (!(await isTeacherOfClass(user.id, evaluation.class, { subjectId: evaluation.subject }))) {
+      throw httpError(403, "Vous n'êtes plus affecté à cette classe pour cette matière.");
+    }
+  }
+  await assertPeriodOpen(evaluation.period);
+
+  const student = await Student.findById(studentId).select("class isActive").lean();
+  if (!student) throw httpError(404, "Élève introuvable.");
+  if (idOf(student.class) !== idOf(evaluation.class) || !student.isActive) {
+    throw httpError(400, "L'élève n'appartient pas à la classe de cette évaluation.");
+  }
+
+  const value = parseScore(score, evaluation.maxScore);
+  const finalComment =
+    typeof comment === "string" && comment.trim() ? comment.trim().slice(0, 300) : getAppreciation(value, evaluation.maxScore);
+
+  return Grade.findOneAndUpdate(
+    { student: studentId, evaluation: evaluationId },
+    { $set: { score: value, comment: finalComment } },
+    { returnDocument: "after", upsert: true, runValidators: true, setDefaultsOnInsert: true }
+  );
+};
+
+const getGradesByStudent = async (studentId, periodId, user) => {
+  const student = await assertStudentAccess(user, studentId);
+  const periodIds = await periodIdsFor(periodId);
+  const evaluationFilter = await teacherEvaluationFilter(user, student.class);
   const grades = await Grade.find({ student: studentId })
     .populate({
       path: "evaluation",
-      match: { period: periodId },
-      populate: { path: "subject", select: "name code" }
+      match: { period: { $in: periodIds }, ...evaluationFilter },
+      populate: { path: "subject", select: "name code" },
     })
     .lean();
-
-  return grades.filter(g => g.evaluation); // supprimer les null
+  return grades.filter((g) => g.evaluation);
 };
 
-/**
- * Suppression d'une note
- * Règles métier :
- * - Interdite si la période est clôturée
- * - Seul le prof de l'évaluation peut supprimer
- */
-const deleteGrade = async (gradeId, teacherId) => {
+const deleteGrade = async (gradeId, user) => {
+  assertObjectId(gradeId, "Identifiant de note");
   const grade = await Grade.findById(gradeId).populate({
     path: "evaluation",
-    populate: { path: "period" }
+    populate: { path: "period", select: "isClosed parentPeriod" },
   });
+  if (!grade) throw httpError(404, "Note introuvable.");
 
-  if (!grade) {
-    throw new Error("Grade not found");
-  }
-
-  // 🔐 Autorité pédagogique
-  if (grade.evaluation.teacher.toString() !== teacherId.toString()) {
-    throw new Error("Teacher not allowed to delete this grade");
-  }
-
-  // 🔒 Période clôturée = données figées
-  if (grade.evaluation.period.isClosed) {
-    throw new Error("Period is closed. Grade deletion forbidden.");
+  if (!grade.evaluation) {
+    // Note orpheline (évaluation supprimée) : seule l'administration peut la retirer
+    if (user.role !== "admin") throw httpError(403, "Suppression non autorisée.");
+  } else {
+    if (user.role === "teacher" && idOf(grade.evaluation.teacher) !== user.id) {
+      throw httpError(403, "Vous ne pouvez supprimer que les notes de vos évaluations.");
+    }
+    await assertPeriodOpen(grade.evaluation.period);
   }
 
   await grade.deleteOne();
   return true;
 };
 
-/**
- * Calculer la moyenne des notes d'un élève pour une période donnée.
- * Utilise la logique de calcul de bulletin.service.js sans sauvegarder le bulletin complet,
- * ou en le générant à la volée.
- */
-const getStudentAverages = async (studentId, classId, periodId) => {
-  // On peut réutiliser la même logique rigoureuse que le bulletin
-  // calculateBulletin crée ou met à jour le bulletin s'il n'est pas publié.
-  // Pour un simple "get", c'est acceptable car c'est idempotent.
-  const bulletin = await BulletinService.calculateBulletin(studentId, classId, periodId);
-
-  // On retourne une structure simplifiée
+/** Moyennes d'un élève, calculées à la volée (aucun bulletin n'est créé ni modifié). */
+const getStudentAverages = async (studentId, classId, periodId, user) => {
+  const student = await assertStudentAccess(user, studentId);
+  if (idOf(student.class) !== idOf(classId)) {
+    throw httpError(400, "L'élève n'est pas inscrit dans cette classe.");
+  }
+  const result = await BulletinService.computeStudentAverages(studentId, periodId);
   return {
-    studentId: bulletin.student,
-    generalAverage: bulletin.generalAverage,
-    averages: bulletin.averages.map(a => ({
-      subject: a.subject,
-      average: a.average,
-      coefficient: a.coefficient
-    }))
+    studentId: result.studentId,
+    generalAverage: result.generalAverage,
+    averages: result.averages.map((a) => ({ subject: a.subject, average: a.average, coefficient: a.coefficient })),
   };
 };
 
-/**
- * Calculer les moyennes de classe par matière et moyenne générale de la classe
- */
-const getClassAverages = async (classId, periodId) => {
-  const { calculateBulletin } = require("../bulletins/bulletin.service");
-  const Class = require("../classes/class.model");
-
-  const currentClass = await Class.findById(classId).lean();
-  if (!currentClass) throw new Error("Class not found");
-
-  // Récupérer tous les élèves de la classe
-  const students = await Student.find({ class: classId, isActive: true }).lean();
-
-  if (students.length === 0) {
-    return {
-      classId,
-      className: currentClass.name,
-      periodId,
-      classAverage: 0,
-      highest: 0,
-      lowest: 0,
-      median: 0,
-      studentsAbove10: 0,
-      studentsBelow10: 0,
-      students: []
-    };
-  }
-
-  const allBulletins = [];
-  for (const student of students) {
-    try {
-      const b = await calculateBulletin(student._id, classId, periodId);
-      allBulletins.push(b);
-    } catch (err) {
-      // Ignorer si l'élève n'a pas d'évaluations par ex
-      console.warn(`Could not calculate average for student ${student._id}: ${err.message}`);
-    }
-  }
-
-  if (allBulletins.length === 0) {
-    return {
-      classId,
-      className: currentClass.name,
-      periodId,
-      classAverage: 0,
-      highest: 0,
-      lowest: 0,
-      median: 0,
-      studentsAbove10: 0,
-      studentsBelow10: 0,
-      students: []
-    };
-  }
-
-  // Calculs statistiques
-  const averagesValues = allBulletins.map(b => b.generalAverage).sort((a, b) => a - b);
-  const sum = averagesValues.reduce((a, b) => a + b, 0);
-  const classAverage = parseFloat((sum / averagesValues.length).toFixed(2));
-  
-  const highest = averagesValues[averagesValues.length - 1];
-  const lowest = averagesValues[0];
-
-  // Médiane
-  const mid = Math.floor(averagesValues.length / 2);
-  const median = averagesValues.length % 2 !== 0 
-    ? averagesValues[mid] 
-    : (averagesValues[mid - 1] + averagesValues[mid]) / 2;
-
-  const studentsAbove10 = averagesValues.filter(v => v >= 10).length;
-  const studentsBelow10 = averagesValues.length - studentsAbove10;
-
-  // Liste des élèves classés
-  const rankedStudents = allBulletins
-    .map(b => {
-      const sInfo = students.find(s => s._id.toString() === b.student.toString());
-      return {
-        studentId: b.student,
-        studentName: sInfo ? `${sInfo.firstName} ${sInfo.lastName}` : "Élève inconnu",
-        average: b.generalAverage
-      };
-    })
-    .sort((a, b) => b.average - a.average)
-    .map((s, index) => ({ ...s, rank: index + 1 }));
-
-  return {
-    classId,
-    className: currentClass.name,
-    periodId,
-    classAverage,
-    highest,
-    lowest,
-    median: parseFloat(median.toFixed(2)),
-    studentsAbove10,
-    studentsBelow10,
-    students: rankedStudents
-  };
-};
-
-/**
- * Calculer la moyenne d'une matière spécifique pour une classe,
- * en listant tous les élèves de la classe et la moyenne générale de la classe
- * pour cette matière donnée.
- */
-const getSubjectAveragesForClass = async (classId, subjectId, periodId) => {
-  // 1. Récupérer tous les élèves actifs de la classe
-  const students = await Student.find({ class: classId, isActive: true })
-    .select("firstName lastName matricule photo")
-    .lean();
-
-  if (students.length === 0) {
-    return { classSubjectAverage: 0, studentAverages: [] };
-  }
-
-  // 2. Récupérer toutes les évaluations de la matière pour la classe et la période
-  let evalQuery = {
-    class: classId,
-    subject: subjectId
-  };
-
-  const Period = require("../periods/period.model");
-  const period = await Period.findById(periodId);
-  if (period && period.type === "TRIMESTRE") {
-    const childSequences = await Period.find({ parentPeriod: periodId }).select("_id");
-    evalQuery.period = { $in: [periodId, ...childSequences.map(s => s._id)] };
-  } else {
-    evalQuery.period = periodId;
-  }
-
-  const evaluations = await Evaluation.find(evalQuery).lean();
-
-  if (evaluations.length === 0) {
-    return {
-      classSubjectAverage: 0,
-      studentAverages: students.map(s => ({ student: s, average: null }))
-    };
-  }
-
-  const evaluationIds = evaluations.map(e => e._id);
-
-  // 3. Récupérer toutes les notes des élèves pour ces évaluations
-  const grades = await Grade.find({
-    student: { $in: students.map(s => s._id) },
-    evaluation: { $in: evaluationIds }
-  }).lean();
-
-  // 4. Calcul de la moyenne par élève pour cette matière
-  const studentAverages = students.map(student => {
-    let totalScore = 0;
-    let totalCoef = 0;
-
-    evaluations.forEach(evalItem => {
-      // Trouver la note de cet élève pour cette évaluation
-      const grade = grades.find(
-        g => g.student.toString() === student._id.toString() &&
-          g.evaluation.toString() === evalItem._id.toString()
-      );
-
-      if (grade && grade.score != null) {
-        // Normaliser sur 20
-        const normalizedScore = (grade.score / evalItem.maxScore) * 20;
-        totalScore += normalizedScore * evalItem.coefficient;
-        totalCoef += evalItem.coefficient;
-      }
-    });
-
-    const average = totalCoef ? parseFloat((totalScore / totalCoef).toFixed(2)) : null;
-
-    return {
-      student,
-      average,
-      totalEvaluations: grades.filter(g => g.student.toString() === student._id.toString()).length
-    };
-  });
-
-  // 5. Calcul de la moyenne générale de la classe pour la matière
-  const studentsWithGrades = studentAverages.filter(s => s.average !== null);
-  const classSum = studentsWithGrades.reduce((sum, s) => sum + s.average, 0);
-  const classSubjectAverage = studentsWithGrades.length
-    ? parseFloat((classSum / studentsWithGrades.length).toFixed(2))
+/** Statistiques et classement d'une classe, calculés à la volée. */
+const getClassAverages = async (classId, periodId, user) => {
+  await assertClassAccess(user, classId);
+  const { classDoc, entries } = await BulletinService.computeClassStandings(classId, periodId);
+  const values = entries.map((e) => e.generalAverage).filter((v) => v !== null).sort((a, b) => a - b);
+  const stats = calc.summarize(values);
+  const mid = Math.floor(values.length / 2);
+  const median = values.length
+    ? values.length % 2
+      ? values[mid]
+      : calc.round2((values[mid - 1] + values[mid]) / 2)
     : 0;
 
   return {
-    classSubjectAverage,
-    studentAverages
+    classId,
+    className: classDoc.name,
+    periodId,
+    classAverage: stats.average ?? 0,
+    highest: stats.max ?? 0,
+    lowest: stats.min ?? 0,
+    median,
+    studentsAbove10: stats.above10,
+    studentsBelow10: stats.count - stats.above10,
+    unclassified: entries.length - stats.count,
+    students: entries
+      .map((e) => ({ studentId: e.key, studentName: e.studentName, average: e.generalAverage, rank: e.rank }))
+      .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity)),
   };
 };
 
-/**
- * Récupère l'ensemble des notes d'une classe pour une période et/ou une matière.
- * Retourne les élèves, les évaluations et les notes pour construire une grille de saisie.
- */
-const getGradesByClass = async (classId, { periodId, subjectId } = {}) => {
-  // 1. Récupérer les élèves de la classe
+/** Moyennes d'une matière pour toute une classe (vue enseignant). */
+const getSubjectAveragesForClass = async (classId, subjectId, periodId, user) => {
+  assertObjectId(classId, "Identifiant de classe");
+  assertObjectId(subjectId, "Identifiant de matière");
+  if (
+    user.role === "teacher" &&
+    !(await isTeacherOfClass(user.id, classId, { subjectId })) &&
+    !(await isPrincipalTeacher(user.id, classId))
+  ) {
+    throw httpError(403, "Accès interdit à cette matière pour cette classe.");
+  }
+
   const students = await Student.find({ class: classId, isActive: true })
     .select("firstName lastName matricule photo")
+    .sort({ lastName: 1, firstName: 1 })
+    .lean();
+  if (!students.length) return { classSubjectAverage: 0, studentAverages: [] };
+
+  const evaluations = await Evaluation.find({
+    class: classId,
+    subject: subjectId,
+    period: { $in: await periodIdsFor(periodId) },
+  }).lean();
+
+  const grades = evaluations.length
+    ? await Grade.find({
+        student: { $in: students.map((s) => s._id) },
+        evaluation: { $in: evaluations.map((e) => e._id) },
+      }).lean()
+    : [];
+
+  const studentAverages = students.map((student) => {
+    const own = grades.filter((g) => idOf(g.student) === idOf(student._id));
+    const scores = new Map(own.map((g) => [idOf(g.evaluation), g.score]));
+    return {
+      student,
+      average: calc.computeSubjectAverage(evaluations, scores),
+      totalEvaluations: own.length,
+    };
+  });
+
+  const classSubjectAverage = calc.summarize(studentAverages.map((s) => s.average)).average ?? 0;
+  return { classSubjectAverage, studentAverages };
+};
+
+/**
+ * Élèves, évaluations et notes d'une classe pour la grille de saisie.
+ * Un enseignant non principal ne reçoit que ses propres évaluations.
+ */
+const getGradesByClass = async (classId, { periodId, subjectId } = {}, user) => {
+  await assertClassAccess(user, classId);
+  const students = await Student.find({ class: classId, isActive: true })
+    .select("firstName lastName matricule photo")
+    .sort({ lastName: 1, firstName: 1 })
     .lean();
 
-  // 2. Construire la requête pour les évaluations
-  const evalQuery = { class: classId };
-  if (periodId) {
-    const Period = require("../periods/period.model");
-    const period = await Period.findById(periodId);
-    if (period && period.type === "TRIMESTRE") {
-      const childSequences = await Period.find({ parentPeriod: periodId }).select("_id");
-      evalQuery.period = { $in: [periodId, ...childSequences.map(s => s._id)] };
-    } else {
-      evalQuery.period = periodId;
-    }
+  const evalQuery = { class: classId, ...(await teacherEvaluationFilter(user, classId)) };
+  if (periodId) evalQuery.period = { $in: await periodIdsFor(periodId) };
+  if (subjectId) {
+    assertObjectId(subjectId, "Identifiant de matière");
+    evalQuery.subject = subjectId;
   }
-  if (subjectId) evalQuery.subject = subjectId;
 
   const evaluations = await Evaluation.find(evalQuery)
     .populate("subject", "name")
@@ -343,40 +245,38 @@ const getGradesByClass = async (classId, { periodId, subjectId } = {}) => {
     .sort({ date: 1 })
     .lean();
 
-  const evalIds = evaluations.map(e => e._id);
-
-  // 3. Récupérer toutes les notes pour ces évaluations et ces élèves
   const grades = await Grade.find({
-    evaluation: { $in: evalIds },
-    student: { $in: students.map(s => s._id) }
+    evaluation: { $in: evaluations.map((e) => e._id) },
+    student: { $in: students.map((s) => s._id) },
   }).lean();
 
   return {
     students,
-    evaluations: evaluations.map(e => ({
+    evaluations: evaluations.map((e) => ({
       id: e._id,
       name: e.name,
       subject: e.subject?.name,
       maxScore: e.maxScore,
       coefficient: e.coefficient,
       date: e.date,
-      isPublished: e.isPublished
+      isPublished: e.isPublished,
     })),
-    grades: grades.map(g => ({
+    grades: grades.map((g) => ({
       studentId: g.student,
       evaluationId: g.evaluation,
       score: g.score,
-      comment: g.comment
-    }))
+      comment: g.comment,
+    })),
   };
 };
 
 module.exports = {
+  getAppreciation,
   upsertGrade,
   getGradesByStudent,
   deleteGrade,
   getStudentAverages,
   getClassAverages,
   getSubjectAveragesForClass,
-  getGradesByClass
+  getGradesByClass,
 };

@@ -1,58 +1,32 @@
 const express = require("express");
-const multer = require("multer");
 const { protect } = require("../../middlewares/auth.middleware");
 const { authorize } = require("../../middlewares/role.middleware");
+const { requireClassAccess } = require("../../utils/access");
+const { spreadsheetUpload } = require("../../utils/upload");
 const controller = require("./class.controller");
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const staff = authorize("admin", "secretary");
+const readers = authorize("admin", "secretary", "teacher");
 
 router.use(protect);
 
 // Classes
-router.post("/", authorize("admin", "secretary"), controller.create);
-router.post("/import", authorize("admin", "secretary"), upload.single("file"), controller.importClasses);
-router.put("/:id", authorize("admin", "secretary"), controller.update);
-router.delete("/:id", authorize("admin", "secretary"), controller.remove);
-router.get("/", authorize("admin", "secretary", "teacher"), controller.getAll);
-router.get("/:id", authorize("admin", "secretary", "teacher"), controller.details);
+router.post("/", staff, controller.create);
+router.post("/import", staff, spreadsheetUpload.single("file"), controller.importClasses);
+router.put("/:id", staff, controller.update);
+router.delete("/:id", staff, controller.remove);
+// Un enseignant ne reçoit que ses classes
+router.get("/", readers, controller.getAll);
+router.get("/:id", readers, requireClassAccess("id"), controller.details);
 
 // Relations
-router.post(
-  "/:classId/student/:studentId",
-  authorize("admin", "secretary"),
-  controller.addStudent
-);
+router.post("/:classId/student/:studentId", staff, controller.addStudent);
+router.post("/:classId/teacher/:teacherId", authorize("admin"), controller.addTeacher);
 
-router.post(
-  "/:classId/subject/:subjectId",
-  authorize("admin"),
-  controller.addSubject
-);
-
-router.post(
-  "/:classId/teacher/:teacherId",
-  authorize("admin"),
-  controller.addTeacher
-);
-
-// Récupérations ciblées
-router.get(
-  "/:id/students",
-  authorize("admin", "teacher"),
-  controller.getStudents
-);
-
-router.get(
-  "/:id/subjects",
-  authorize("admin", "teacher"),
-  controller.getSubjects
-);
-
-router.get(
-  "/:id/teachers",
-  authorize("admin", "teacher"),
-  controller.getTeachers
-);
+// Récupérations ciblées (enseignant : uniquement ses classes)
+router.get("/:id/students", readers, requireClassAccess("id"), controller.getStudents);
+router.get("/:id/subjects", readers, requireClassAccess("id"), controller.getSubjects);
+router.get("/:id/teachers", readers, requireClassAccess("id"), controller.getTeachers);
 
 module.exports = router;
