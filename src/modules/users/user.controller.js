@@ -1,6 +1,7 @@
 const User = require("./user.model");
 const userService = require("./user.service");
 const { signToken } = require("../auth/auth.service");
+const { releaseSupervisor } = require("../vieScolaire/supervisors.service");
 const { sendError, httpError } = require("../../utils/httpError");
 const {
   assertValidPassword,
@@ -11,9 +12,20 @@ const {
 } = require("../../utils/password");
 
 const PROFILE_FIELDS = ["firstName", "lastName", "email", "phone"];
-const ROLES = ["admin", "teacher", "parent", "student", "secretary"];
+const ROLES = ["admin", "teacher", "parent", "student", "secretary", "supervisor"];
 const SECRETARY_VISIBLE_ROLES = ["parent", "student", "teacher"];
 const SECRETARY_EDITABLE_ROLES = ["parent", "student"];
+
+/**
+ * Fonctions confiées par l'administrateur (ex. surveillant général). Seuls l'enseignant et la
+ * secrétaire peuvent en recevoir ; pour les autres rôles la liste est vidée.
+ */
+const parseFunctions = (value, role) => {
+  if (!Array.isArray(value) || value.some((f) => !User.STAFF_FUNCTIONS.includes(f))) {
+    throw httpError(400, "Fonctions invalides.");
+  }
+  return User.FUNCTION_ROLES.includes(role) ? [...new Set(value)] : [];
+};
 
 const pick = (obj = {}, keys) =>
   Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
@@ -68,6 +80,9 @@ const update = async (req, res) => {
       if (String(target._id) === req.user.id) throw httpError(400, "Vous ne pouvez pas modifier votre propre rôle.");
       data.role = req.body.role;
     }
+    if (req.user.role === "admin" && (req.body.functions !== undefined || data.role)) {
+      data.functions = parseFunctions(req.body.functions ?? target.functions ?? [], data.role || target.role);
+    }
 
     // Réinitialisation par l'administration : mot de passe fourni ou provisoire généré.
     let temporaryPassword;
@@ -84,6 +99,10 @@ const update = async (req, res) => {
     }
 
     const updated = await userService.updateUser(req.params.id, data);
+    // N'est plus surveillant général (fonction retirée ou changement de rôle) : ses classes sont libérées
+    if (User.isSupervisorUser(target) && !User.isSupervisorUser(updated)) {
+      await releaseSupervisor(target._id);
+    }
     res.json(req.body.generateTemporaryPassword === true ? { ...updated, temporaryPassword } : updated);
   } catch (err) {
     sendError(res, err);
@@ -109,6 +128,7 @@ const remove = async (req, res) => {
     Student.updateMany({ parents: targetUser._id }, { $pull: { parents: targetUser._id } }),
     TeacherAssignment.deleteMany({ teacherId: targetUser._id }),
     Class.updateMany({ principalTeacher: targetUser._id }, { $unset: { principalTeacher: 1 } }),
+    releaseSupervisor(targetUser._id),
     Notification.deleteMany({ user: targetUser._id }),
   ]);
   await User.findByIdAndDelete(req.params.id);
@@ -152,6 +172,7 @@ const create = async (req, res) => {
     const user = await userService.createUser({
       ...data,
       role,
+      functions: req.user.role === "admin" && req.body.functions !== undefined ? parseFunctions(req.body.functions, role) : [],
       password: await hashPassword(temporaryPassword),
       mustChangePassword: true,
     });

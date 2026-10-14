@@ -9,11 +9,18 @@ const handle = (fn, successStatus = 200) => async (req, res) => {
   }
 };
 
+/** Le surveillant général d'une classe est désigné par l'administrateur seul. */
+const withoutSupervisor = (req) => {
+  const body = { ...(req.body || {}) };
+  if (req.user?.role !== "admin") delete body.supervisor;
+  return body;
+};
+
 module.exports = {
-  create: handle((req) => service.createClass(req.body || {}), 201),
+  create: handle((req) => service.createClass(withoutSupervisor(req)), 201),
   getAll: handle((req) => service.getAllClasses(req.query.schoolYearId, req.user)),
   details: handle((req) => service.getClassDetails(req.params.id)),
-  update: handle((req) => service.updateClass(req.params.id, req.body || {})),
+  update: handle((req) => service.updateClass(req.params.id, withoutSupervisor(req))),
   remove: handle((req) => service.deleteClass(req.params.id)),
   importClasses: async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Fichier requis" });

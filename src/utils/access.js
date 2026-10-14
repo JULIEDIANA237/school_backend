@@ -2,6 +2,44 @@ const mongoose = require("mongoose");
 const { httpError } = require("./httpError");
 
 const isStaff = (user) => user?.role === "admin" || user?.role === "secretary";
+
+/**
+ * Vie scolaire :
+ * - le surveillant général (rôle dédié, ou enseignant / secrétaire qui cumule la fonction) fait l'appel,
+ *   saisit les absences, traite les justificatifs et décide des sanctions de SES classes ;
+ * - l'administrateur consulte tout l'établissement (et règle le règlement intérieur), sans saisir.
+ */
+const isSupervisor = (user) =>
+  user?.role === "supervisor" ||
+  ((user?.role === "teacher" || user?.role === "secretary") && (user.functions || []).includes("vie_scolaire"));
+
+/** Consultation de la vie scolaire : administrateur et surveillants généraux. */
+const canViewVieScolaire = (user) => user?.role === "admin" || isSupervisor(user);
+
+const requireVieScolaire = (req, res, next) =>
+  canViewVieScolaire(req.user) ? next() : res.status(403).json({ error: "Réservé à la vie scolaire." });
+
+/**
+ * Classes visibles en vie scolaire : celles dont l'utilisateur est le surveillant général
+ * (Class.supervisor) ; null pour l'administrateur, qui voit toutes les classes.
+ * @returns {Promise<string[] | null>}
+ */
+const supervisedClassIds = async (user) => {
+  if (user?.role === "admin") return null;
+  if (!isSupervisor(user)) return [];
+  const Class = require("../modules/classes/class.model");
+  return (await Class.distinct("_id", { supervisor: user.id })).map(String);
+};
+
+/** Vrai pour le surveillant général de cette classe : lui seul y agit (l'administrateur consulte). */
+const supervisesClass = async (user, classId) => {
+  if (!isSupervisor(user) || !mongoose.isValidObjectId(classId)) return false;
+  const Class = require("../modules/classes/class.model");
+  return !!(await Class.exists({ _id: classId, supervisor: user.id }));
+};
+
+/** Consultation d'une classe : l'administrateur, ou son surveillant général. */
+const viewsClass = async (user, classId) => user?.role === "admin" || supervisesClass(user, classId);
 const sameId = (a, b) => a != null && b != null && String(a?._id ?? a) === String(b?._id ?? b);
 
 /**
@@ -59,6 +97,12 @@ const requireClassAccess = (param = "classId", { subjectParam } = {}) => async (
 
 module.exports = {
   isStaff,
+  isSupervisor,
+  canViewVieScolaire,
+  requireVieScolaire,
+  supervisedClassIds,
+  supervisesClass,
+  viewsClass,
   sameId,
   isTeacherOfClass,
   isPrincipalTeacher,

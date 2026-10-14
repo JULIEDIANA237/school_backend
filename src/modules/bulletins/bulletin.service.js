@@ -12,6 +12,8 @@ const TeacherAssignment = require("../teachers/teacherAssignment.model");
 const calc = require("./bulletin.calculator");
 const { httpError } = require("../../utils/httpError");
 const { assertTemplate, getSchoolProfile } = require("../school/school.service");
+const { bulletinDiscipline } = require("../vieScolaire/discipline.service");
+const { getSettings: getVieScolaireSettings, conductProposals } = require("../vieScolaire/settings.service");
 
 const DECISION_CODES = ["TH", "AT", "THE", "BT", "THF", "ET", "AC", "BC", "EC"];
 const idOf = (value) => String(value?._id ?? value);
@@ -183,6 +185,7 @@ const generateForClass = async (classId, periodId, template) => {
 
   const results = await computeForStudents(ctx, studentIds);
   const ranked = rankEntries(studentIds.map((id) => ({ key: idOf(id), ...results.get(idOf(id)) })));
+  const discipline = await bulletinDiscipline(studentIds, ctx.period);
 
   if (ranked.entries.length) {
     await Bulletin.bulkWrite(
@@ -196,6 +199,7 @@ const generateForClass = async (classId, periodId, template) => {
               generalAverage: e.generalAverage,
               rank: e.rank,
               classifiedCount: ranked.classifiedCount,
+              discipline: discipline.get(e.key),
               ...templateUpdate.$set,
             },
             ...(templateUpdate.$setOnInsert && { $setOnInsert: templateUpdate.$setOnInsert }),
@@ -268,6 +272,27 @@ const loadForNotification = (bulletinId) =>
     .populate("period", "name type year")
     .populate("class", "name");
 
+/**
+ * Bloc discipline figé à la publication : ce que le parent voit ne change plus ensuite.
+ * @returns {Promise<Map<string, object>>} par identifiant de bulletin
+ */
+const disciplineAtPublication = async (bulletins) => {
+  const result = new Map();
+  const byPeriod = new Map();
+  for (const b of bulletins) {
+    const key = idOf(b.period);
+    if (!byPeriod.has(key)) byPeriod.set(key, []);
+    byPeriod.get(key).push(b);
+  }
+  for (const [periodId, group] of byPeriod) {
+    const period = await Period.findById(periodId).lean();
+    if (!period) continue;
+    const summaries = await bulletinDiscipline(group.map((b) => b.student?._id ?? b.student), period);
+    for (const b of group) result.set(idOf(b._id), summaries.get(idOf(b.student)));
+  }
+  return result;
+};
+
 const publishBulletin = async (bulletinId) => {
   assertObjectId(bulletinId, "Identifiant de bulletin");
   const NotificationService = require("../notifications/notification.service");
@@ -276,6 +301,7 @@ const publishBulletin = async (bulletinId) => {
 
   bulletin.isPublished = true;
   bulletin.publishedAt = new Date();
+  bulletin.discipline = (await disciplineAtPublication([bulletin])).get(idOf(bulletin._id));
   await bulletin.save();
 
   await NotificationService.notifyBulletinPublicationInApp(bulletin);
@@ -308,9 +334,14 @@ const bulkPublishBulletins = async (classId, periodId) => {
   if (!bulletins.length) return 0;
 
   const publishedAt = new Date();
-  await Bulletin.updateMany(
-    { _id: { $in: bulletins.map((b) => b._id) }, isPublished: { $ne: true } },
-    { $set: { isPublished: true, publishedAt } },
+  const discipline = await disciplineAtPublication(bulletins);
+  await Bulletin.bulkWrite(
+    bulletins.map((b) => ({
+      updateOne: {
+        filter: { _id: b._id, isPublished: { $ne: true } },
+        update: { $set: { isPublished: true, publishedAt, discipline: discipline.get(idOf(b._id)) } },
+      },
+    })),
   );
   bulletins.forEach((b) => {
     b.isPublished = true;
@@ -500,6 +531,13 @@ const getBulletinById = async (bulletinId) => {
   });
 
   if (bulletin.isPublished) bulletin.verificationCode = verificationCode(bulletin);
+  // Discipline : un brouillon montre toujours les absences actuelles (saisies après la génération comprises) ;
+  // un bulletin publié garde les valeurs figées à sa publication (ou les actuelles s'il a été publié avant le module).
+  if (bulletin.student && bulletin.period && (!bulletin.isPublished || !bulletin.discipline)) {
+    bulletin.discipline = (await bulletinDiscipline([bulletin.student._id], bulletin.period)).get(idOf(bulletin.student));
+  }
+  // Décisions de conduite suggérées au conseil d'après le règlement intérieur (non affichées aux parents)
+  bulletin.disciplineProposals = bulletin.discipline ? conductProposals(bulletin.discipline, await getVieScolaireSettings()) : [];
   return bulletin;
 };
 

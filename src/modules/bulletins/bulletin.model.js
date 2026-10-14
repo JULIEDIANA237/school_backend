@@ -34,6 +34,18 @@ const bulletinSchema = new Schema(
     rank: { type: Number, default: null },
     // Nombre d'élèves classés dans la classe pour cette période (« rang x / classifiedCount »)
     classifiedCount: Number,
+    // Assiduité et discipline de la période (module vie scolaire), figées à la génération
+    discipline: {
+      _id: false,
+      justifiedHours: Number,
+      unjustifiedHours: Number,
+      totalHours: Number,
+      lateCount: Number,
+      detentionHours: Number,
+      exclusionDays: Number,
+      warningCount: Number,
+      blameCount: Number,
+    },
     teacherComment: String,
     principalComment: String,
     decisions: [String], // Pour stocker les cases cochées

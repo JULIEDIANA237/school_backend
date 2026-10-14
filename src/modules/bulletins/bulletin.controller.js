@@ -103,6 +103,7 @@ const BulletinController = {
       if (req.user.role === "parent") {
         const isOwner = (bulletin.student?.parents || []).some((p) => sameId(p, req.user.id));
         if (!isOwner || !bulletin.isPublished) return res.status(404).json({ error: "Bulletin introuvable" });
+        delete bulletin.disciplineProposals;
       } else if (req.user.role === "teacher") {
         await assertClassAccess(req.user, bulletin.class?._id);
       }

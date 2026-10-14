@@ -14,7 +14,7 @@ const { normalizeText } = require("../../utils/text");
 const { httpError } = require("../../utils/httpError");
 const { bulkWriteSafe } = require("../../utils/bulk");
 
-const CLASS_FIELDS = ["name", "level", "cycleId", "serie", "principalTeacher", "isActive"];
+const CLASS_FIELDS = ["name", "level", "cycleId", "serie", "principalTeacher", "supervisor", "isActive"];
 const pickFields = (data = {}) =>
   Object.fromEntries(CLASS_FIELDS.filter((k) => data[k] !== undefined).map((k) => [k, data[k]]));
 
@@ -34,6 +34,19 @@ const normalizePrincipal = async (fields) => {
   }
 };
 
+/** Surveillant général : un enseignant ou une secrétaire à qui la fonction « vie scolaire » est confiée. */
+const normalizeSupervisor = async (fields) => {
+  if (fields.supervisor === undefined) return;
+  if (fields.supervisor === null || fields.supervisor === "") {
+    fields.supervisor = null;
+    return;
+  }
+  assertObjectId(fields.supervisor, "Surveillant général");
+  if (!(await User.exists({ _id: fields.supervisor, ...User.SUPERVISOR_QUERY }))) {
+    throw httpError(400, "Choisissez un surveillant général (compte dédié ou enseignant qui cumule la fonction).");
+  }
+};
+
 const createClass = async (data) => {
   if (!data.schoolYearId) throw httpError(400, "schoolYearId est requis");
   assertObjectId(data.schoolYearId, "Année scolaire");
@@ -44,6 +57,8 @@ const createClass = async (data) => {
     if (!(await Cycle.exists({ _id: fields.cycleId }))) throw httpError(400, "Cycle introuvable.");
   }
   await normalizePrincipal(fields);
+  await normalizeSupervisor(fields);
+  for (const key of ["principalTeacher", "supervisor"]) if (fields[key] === null) delete fields[key];
   return Class.create({ ...fields, schoolYearId: data.schoolYearId });
 };
 
@@ -52,10 +67,13 @@ const updateClass = async (id, data) => {
   assertObjectId(id, "Identifiant de classe");
   const fields = pickFields(data);
   await normalizePrincipal(fields);
+  await normalizeSupervisor(fields);
   const update = { $set: { ...fields } };
-  if (fields.principalTeacher === null) {
-    delete update.$set.principalTeacher;
-    update.$unset = { principalTeacher: 1 };
+  // null : retirer le professeur principal ou le surveillant général
+  for (const key of ["principalTeacher", "supervisor"]) {
+    if (fields[key] !== null) continue;
+    delete update.$set[key];
+    update.$unset = { ...update.$unset, [key]: 1 };
   }
   const updated = await Class.findByIdAndUpdate(id, update, { returnDocument: "after", runValidators: true });
   if (!updated) throw httpError(404, "Classe introuvable.");
@@ -212,6 +230,7 @@ const getAllClasses = async (schoolYearId, user) => {
     .populate("cycleId")
     .populate("schoolYearId")
     .populate("principalTeacher", "firstName lastName")
+    .populate("supervisor", "firstName lastName")
     .sort({ name: 1 })
     .lean();
 
@@ -232,7 +251,8 @@ const getClassDetails = async (id) => {
   const classDoc = await Class.findById(id)
     .populate("cycleId")
     .populate("schoolYearId")
-    .populate("principalTeacher", "firstName lastName");
+    .populate("principalTeacher", "firstName lastName")
+    .populate("supervisor", "firstName lastName");
   if (!classDoc) throw httpError(404, "Classe introuvable.");
   return classDoc;
 };
