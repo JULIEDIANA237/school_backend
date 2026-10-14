@@ -26,6 +26,9 @@ const classSchema = new Schema(
     // Subjects sont maintenant dans la collection ClassSubject
     teachers: [{ type: Types.ObjectId, ref: "User" }],
     principalTeacher: { type: Types.ObjectId, ref: "User" },
+    // Surveillant général : appels, absences, justificatifs et sanctions de la classe (un par classe,
+    // qui peut suivre plusieurs classes, par exemple toutes les 6e)
+    supervisor: { type: Types.ObjectId, ref: "User", index: true },
 
     isActive: { type: Boolean, default: true }
   },

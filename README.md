@@ -97,6 +97,18 @@ L'inscription publique crée uniquement des comptes parents (`POST /api/auth/reg
 - `POST /api/bulletins/generate` recalcule une classe **sans effacer** les appréciations ni les décisions. Il est refusé (`409`) si un bulletin de la classe est déjà publié pour la période : dépubliez d'abord.
 - Une période clôturée (`PATCH /api/periods/:id/closure`), ou une séquence dont le trimestre est clôturé, n'accepte plus aucune modification de notes ni d'évaluations.
 - Chaque bulletin publié porte un QR code pointant vers `GET /api/bulletins/verify/:id/:code` (public), qui confirme son authenticité.
+- Le bloc « Discipline » (absences justifiées et non justifiées en heures, retards, heures de retenue) est calculé à partir de la vie scolaire, sur les dates de la période. Il est toujours à jour tant que le bulletin est un brouillon, puis figé à la publication. Un bulletin publié avant le module affiche les valeurs actuelles.
+
+---
+
+## 🛡️ Vie scolaire (`/api/vie-scolaire`)
+
+- **Surveillant général** : soit un compte dédié (rôle `supervisor`), soit un enseignant ou une secrétaire qui cumule la fonction (`functions: ["vie_scolaire"]`) et garde son rôle ; un enseignant continue donc d'enseigner. L'administrateur lui attribue des classes (`Class.supervisor`, une classe = un surveillant) par `PUT /supervisors/:userId` ou depuis la fiche de la classe (`PUT /api/classes/:id`, champ `supervisor`). Retirer la fonction, changer de rôle ou supprimer le compte libère ses classes.
+- **Qui fait quoi** : l'enseignant fait l'appel de ses cours ; le surveillant général fait l'appel, saisit les absences, traite les justificatifs et décide des sanctions de ses classes, et lui seul. L'administrateur consulte tout l'établissement, fixe le règlement intérieur et désigne les surveillants ; toute saisie de sa part est refusée (`403`, code `VIE_SCOLAIRE_READ_ONLY`). Une classe sans surveillant est signalée sur son tableau de bord ; les justificatifs de ses élèves lui sont alors notifiés.
+- **Appel** (`POST /sessions`) : un appel par classe et par créneau (jour + heure de début). Seuls les absents et les retards sont transmis. L'enseignant fait l'appel de ses classes, le jour même ou dans les 7 jours qui précèdent ; au-delà, seule la vie scolaire peut le corriger.
+- **Parents** : prévenus dans l'application et par email à chaque absence, retard ou sanction, et lorsqu'un élève signalé était finalement présent (correction). Ils envoient un justificatif (message et photo ou PDF de 600 Ko au plus) que la vie scolaire accepte ou refuse.
+- **Règlement intérieur** (`GET/PUT /settings`, modification par l'administrateur) : seuils d'alerte, et seuils d'heures non justifiées à partir desquels un avertissement, un blâme ou une exclusion pour conduite est proposé au conseil de classe (0 désactive un seuil).
+- Les jours sont stockés au format `AAAA-MM-JJ` dans le fuseau de l'établissement (`SCHOOL_TIMEZONE`, par défaut `Africa/Douala`).
 
 ---
 
@@ -133,7 +145,10 @@ erDiagram
 - **TeacherAssignment (Attributions) :** Table de liaison entre enseignant, classe et matière.
 - **Evaluation :** Contrôles/Devoirs créés par les enseignants pour une classe, une matière et une période.
 - **Grade (Notes) :** Notes individuelles des élèves liées à une évaluation.
-- **Bulletin :** Moyennes globales calculées, classements, appréciations et décisions du conseil de classe.
+- **Bulletin :** Moyennes globales calculées, classements, appréciations, décisions du conseil de classe et bloc discipline.
+- **AttendanceSession / AttendanceRecord (Vie scolaire) :** Appels par créneau, absences et retards, justificatifs des parents (`JustificationFile` pour les pièces jointes).
+- **DisciplineIncident :** Retenues, exclusions temporaires, avertissements et blâmes de conduite.
+- **VieScolaireSettings :** Règlement intérieur (seuils d'alerte et barème).
 
 ---
 
@@ -192,6 +207,7 @@ Toutes les routes, sauf `/api/auth/*` et la vérification publique `GET /api/bul
 | `/api/evaluations` | Évaluations | `teacher` (les siennes) ; lecture `admin`, `secretary` |
 | `/api/grades` | Notes et moyennes calculées à la volée | `teacher` (ses classes), `admin`, `secretary` |
 | `/api/bulletins` | Génération, publication, appréciations, vérification | `admin`, `secretary` ; professeur principal ; `parent` (bulletins publiés de ses enfants) |
+| `/api/vie-scolaire` | Appel, absences et retards, justificatifs, sanctions, règlement intérieur, surveillants généraux | `teacher` (appel de ses classes) ; surveillant général, rôle `supervisor` ou fonction (saisie dans ses classes) ; `admin` (consultation, règlement, désignations) ; `parent` (ses enfants) |
 | `/api/notifications` | Notifications de l'utilisateur connecté | Tous |
 | `/api/admin/dashboard` | Statistiques de l'administration | `admin`, `secretary` |
 

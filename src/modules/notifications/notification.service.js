@@ -80,18 +80,18 @@ const notificationService = {
   /**
    * Emails de suivi aux parents (nouvelle évaluation, note publiée), envoyés l'un après l'autre,
    * aux couleurs et avec les coordonnées de l'établissement.
-   * @param {{ parent: { email, firstName }, content: { title, message } }[]} jobs
+   * @param {{ parent: { email, firstName }, content: { title, message, link?, ctaLabel? } }[]} jobs
+   *   link : page de l'espace parent ouverte par le bouton (par défaut l'accueil)
    */
   async sendParentEmails(jobs) {
     const profile = await getSchoolProfile();
-    const link = `${frontendUrl()}/parent`;
     for (const { parent, content } of jobs) {
       try {
         const { fromName, ...email } = buildSchoolEmail(profile, {
           title: content.title,
           greeting: parent.firstName || "Parent",
           paragraphs: [content.message, "Suivez la scolarité de votre enfant tout au long de l'année depuis votre espace parent."],
-          cta: { label: "Ouvrir mon espace parent", url: link },
+          cta: { label: content.ctaLabel || "Ouvrir mon espace parent", url: `${frontendUrl()}${content.link || "/parent"}` },
         });
         await sendEmail({ to: parent.email, subject: `${shortLabel(profile)} – ${content.title}`, fromName, ...email });
       } catch (err) {

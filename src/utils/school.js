@@ -15,4 +15,10 @@ const schoolTimeZone = () => process.env.SCHOOL_TIMEZONE || "Africa/Douala";
 const formatSchoolDate = (value) =>
   value ? new Date(value).toLocaleDateString("fr-FR", { timeZone: schoolTimeZone() }) : "";
 
-module.exports = { frontendUrl, schoolTimeZone, formatSchoolDate };
+/** Jour « AAAA-MM-JJ » d'une date dans le fuseau de l'établissement (aujourd'hui par défaut). */
+const schoolDay = (value = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: schoolTimeZone(), year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date(value),
+  );
+
+module.exports = { frontendUrl, schoolTimeZone, formatSchoolDate, schoolDay };

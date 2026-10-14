@@ -27,7 +27,7 @@ const getAdminStats = async (req, res) => {
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
     // Notifications du personnel uniquement : celles des parents contiennent les résultats des élèves.
-    const staffIds = await User.distinct("_id", { role: { $in: ["admin", "secretary", "teacher"] } });
+    const staffIds = await User.distinct("_id", { role: { $in: ["admin", "secretary", "teacher", "supervisor"] } });
 
     const [studentsCount, newStudents, teachersCount, pendingEvaluations, draftBulletins, bulletins, recentActivities] =
       await Promise.all([

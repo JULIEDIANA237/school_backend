@@ -21,7 +21,7 @@ const authenticate = ({ allowPendingPasswordChange = false } = {}) => async (req
   }
 
   try {
-    const user = await User.findById(payload.id).select("role passwordChangedAt mustChangePassword").lean();
+    const user = await User.findById(payload.id).select("role functions passwordChangedAt mustChangePassword").lean();
     if (!user) return res.status(401).json({ error: "Compte introuvable." });
 
     if (user.passwordChangedAt && payload.iat * 1000 < new Date(user.passwordChangedAt).getTime()) {
@@ -31,6 +31,7 @@ const authenticate = ({ allowPendingPasswordChange = false } = {}) => async (req
     req.user = {
       id: String(user._id),
       role: user.role,
+      functions: user.functions || [],
       mustChangePassword: Boolean(user.mustChangePassword),
     };
 
