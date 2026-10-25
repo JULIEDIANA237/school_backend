@@ -17,6 +17,7 @@ router.put("/:id", staff, StudentController.update);
 // Enseignant : uniquement ses classes (vérifié dans le contrôleur)
 router.get("/class/:classId", authorize("admin", "secretary", "teacher"), StudentController.byClass);
 router.get("/parent/me", authorize("parent"), StudentController.byParent);
+router.get("/me", authorize("student"), StudentController.getMe);
 
 router.post("/:studentId/parent", staff, StudentController.addParent);
 router.patch("/:studentId/class", staff, StudentController.changeClass);

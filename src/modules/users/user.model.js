@@ -4,13 +4,17 @@ const mongoose = require("mongoose");
  * Surveillant général : soit un compte dédié (rôle « supervisor »), soit un enseignant ou une secrétaire
  * qui cumule cette fonction (functions: ["vie_scolaire"]) tout en gardant son rôle.
  */
-const STAFF_FUNCTIONS = ["vie_scolaire"];
+const STAFF_FUNCTIONS = ["vie_scolaire", "censeur"];
 /** Rôles qui peuvent cumuler une fonction. */
-const FUNCTION_ROLES = ["teacher", "secretary"];
+const FUNCTION_ROLES = ["teacher", "secretary", "admin"];
 
 /** Vrai pour un surveillant général (rôle dédié ou fonction cumulée). */
 const isSupervisorUser = (user) =>
   user?.role === "supervisor" || (FUNCTION_ROLES.includes(user?.role) && (user.functions || []).includes("vie_scolaire"));
+
+/** Vrai pour un censeur (rôle dédié ou fonction cumulée ou admin). */
+const isCenseurUser = (user) =>
+  user?.role === "admin" || user?.role === "censeur" || (user.functions || []).includes("censeur");
 
 const userSchema = new mongoose.Schema(
   {
@@ -22,7 +26,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       lowercase: true,
       trim: true,
-      enum: ["admin", "teacher", "parent", "student", "secretary", "supervisor"],
+      enum: ["admin", "teacher", "parent", "student", "secretary", "supervisor", "censeur"],
       required: true,
     },
     phone: { type: String, trim: true },
@@ -58,5 +62,6 @@ module.exports = mongoose.model("User", userSchema);
 module.exports.STAFF_FUNCTIONS = STAFF_FUNCTIONS;
 module.exports.FUNCTION_ROLES = FUNCTION_ROLES;
 module.exports.isSupervisorUser = isSupervisorUser;
+module.exports.isCenseurUser = isCenseurUser;
 /** Filtre MongoDB des surveillants généraux (rôle dédié ou fonction cumulée). */
 module.exports.SUPERVISOR_QUERY = { $or: [{ role: "supervisor" }, { role: { $in: FUNCTION_ROLES }, functions: "vie_scolaire" }] };

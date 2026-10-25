@@ -23,6 +23,11 @@ const classSubjectSchema = new Schema(
       type: Number,
       required: true,
     },
+    weeklyHours: {
+      type: Number,
+      default: 2,
+      min: 0,
+    },
     group: {
       type: Number,
       default: 1,

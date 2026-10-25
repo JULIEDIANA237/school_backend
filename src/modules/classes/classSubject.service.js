@@ -53,6 +53,9 @@ const assignSubjectToClass = async (data = {}) => {
       schoolYearId: classDoc.schoolYearId,
       coefficient: parseCoefficient(data.coefficient),
       group: parseGroup(data.group),
+      ...(data.weeklyHours !== undefined && data.weeklyHours !== null && {
+        weeklyHours: Math.max(0, Number(data.weeklyHours) || 0),
+      }),
     },
     { upsert: true, returnDocument: "after", setDefaultsOnInsert: true, runValidators: true }
   );

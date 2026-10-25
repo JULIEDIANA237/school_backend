@@ -26,6 +26,8 @@ const StudentController = {
 
   byParent: handle((req) => StudentService.getStudentsByParent(req.user.id)),
 
+  getMe: handle((req) => StudentService.getStudentByUserId(req.user.id)),
+
   deactivate: handle((req) => StudentService.deactivateStudent(req.params.studentId)),
 
   getAll: handle((req) => StudentService.getAllStudents(req.query.schoolYearId)),

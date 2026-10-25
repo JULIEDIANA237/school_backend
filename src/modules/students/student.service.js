@@ -465,6 +465,28 @@ const importStudentsFromExcel = async (fileBuffer, defaultClassId, schoolYearId)
   return result;
 };
 
+const getStudentByUserId = async (userId) => {
+  const student = await Student.findOne({ userId })
+    .populate("class", "name level schoolYearId")
+    .populate("parents", "firstName lastName email phone")
+    .lean();
+  if (!student) {
+    const user = await User.findById(userId).lean();
+    if (user && user.email) {
+      const matricule = user.email.split("@")[0];
+      const match = await Student.findOne({ matricule })
+        .populate("class", "name level schoolYearId")
+        .populate("parents", "firstName lastName email phone")
+        .lean();
+      if (match) {
+        await Student.updateOne({ _id: match._id }, { userId });
+        return match;
+      }
+    }
+  }
+  return student;
+};
+
 module.exports = {
   createStudent,
   updateStudent,
@@ -474,6 +496,7 @@ module.exports = {
   changeStudentClass,
   deactivateStudent,
   getStudentsByParent,
+  getStudentByUserId,
   importStudentsFromExcel,
   findOrCreateParent,
 };
