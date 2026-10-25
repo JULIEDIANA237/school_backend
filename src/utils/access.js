@@ -71,17 +71,26 @@ const assertClassAccess = async (user, classId, options = {}) => {
   throw httpError(403, "Accès interdit à cette classe.");
 };
 
+const isCenseur = (user) =>
+  user?.role === "admin" ||
+  user?.role === "censeur" ||
+  (user?.functions || []).includes("censeur");
+
+const requireCenseur = (req, res, next) =>
+  isCenseur(req.user) ? next() : res.status(403).json({ error: "Réservé au censeur ou à l'administration." });
+
 /** Charge l'élève et vérifie que l'utilisateur peut le consulter. */
 const assertStudentAccess = async (user, studentId) => {
   if (!mongoose.isValidObjectId(studentId)) throw httpError(400, "Identifiant d'élève invalide.");
   const Student = require("../modules/students/student.model");
-  const student = await Student.findById(studentId).select("class parents isActive").lean();
+  const student = await Student.findById(studentId).select("class parents userId isActive").lean();
   if (!student) throw httpError(404, "Élève introuvable.");
-  if (isStaff(user)) return student;
+  if (isStaff(user) || isCenseur(user)) return student;
   if (user?.role === "teacher" && (await isTeacherOfClass(user.id, student.class))) return student;
   if (user?.role === "parent" && (student.parents || []).some((p) => sameId(p, user.id))) return student;
+  if (user?.role === "student" && (sameId(student.userId, user.id) || sameId(student._id, user.id))) return student;
   // 404 plutôt que 403 pour ne pas confirmer l'existence de l'élève
-  throw httpError(user?.role === "parent" ? 404 : 403, user?.role === "parent" ? "Élève introuvable." : "Accès interdit à cet élève.");
+  throw httpError(user?.role === "parent" || user?.role === "student" ? 404 : 403, user?.role === "parent" || user?.role === "student" ? "Élève introuvable." : "Accès interdit à cet élève.");
 };
 
 /** Middleware : vérifie l'accès à la classe désignée par req.params[param]. */
@@ -98,6 +107,8 @@ const requireClassAccess = (param = "classId", { subjectParam } = {}) => async (
 module.exports = {
   isStaff,
   isSupervisor,
+  isCenseur,
+  requireCenseur,
   canViewVieScolaire,
   requireVieScolaire,
   supervisedClassIds,

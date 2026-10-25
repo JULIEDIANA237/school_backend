@@ -40,6 +40,13 @@ const studentSchema = new mongoose.Schema(
       }
     ],
 
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+      sparse: true,
+    },
+
     photo: String,
     isActive: { type: Boolean, default: true }
   },
