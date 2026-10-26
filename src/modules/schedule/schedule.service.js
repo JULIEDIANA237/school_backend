@@ -13,6 +13,8 @@ const Grade = require("../grades/grade.model");
 const Bulletin = require("../bulletins/bulletin.model");
 const Evaluation = require("../evaluations/evaluation.model");
 const AttendanceSession = require("../vieScolaire/attendanceSession.model");
+const Notification = require("../notifications/notification.model");
+const SubjectProgram = require("../programs/subjectProgram.model");
 const { httpError } = require("../../utils/httpError");
 const { isCenseur, isTeacherOfClass, sameId } = require("../../utils/access");
 
@@ -298,14 +300,28 @@ const checkWeeklyHoursQuota = async ({
 // Entrées d'emploi du temps (Schedule Entries)
 // -------------------------------------------------------------
 const createScheduleEntry = async (data, { allowExceedQuota = false } = {}) => {
-  const { classId, subjectId, teacherId, roomId, dayOfWeek, startTime, endTime, color, notes } = data;
+  let { classId, subjectId, teacherId, roomId, dayOfWeek, startTime, endTime, color, notes } = data;
+
+  const schoolYearId = await resolveSchoolYearId(data.schoolYearId);
+  if (!schoolYearId) throw httpError(400, "Année scolaire introuvable.");
+
+  // Résolution automatique de l'enseignant assigné si non fourni
+  if (!teacherId && classId && subjectId) {
+    const TeacherAssignment = require("../teachers/teacherAssignment.model");
+    const assignment = await TeacherAssignment.findOne({
+      classId,
+      subjectId,
+      schoolYearId,
+      isActive: true,
+    }).lean();
+    if (assignment) {
+      teacherId = String(assignment.teacherId);
+    }
+  }
 
   if (!classId || !subjectId || !teacherId || !dayOfWeek || !startTime || !endTime) {
     throw httpError(400, "Classe, matière, enseignant, jour et horaires sont obligatoires.");
   }
-
-  const schoolYearId = await resolveSchoolYearId(data.schoolYearId);
-  if (!schoolYearId) throw httpError(400, "Année scolaire introuvable.");
 
   const durationHours = data.durationHours || calculateDurationHours(startTime, endTime);
   if (durationHours <= 0) throw httpError(400, "L'heure de fin doit être postérieure à l'heure de début.");
@@ -543,6 +559,38 @@ const getQuotaSummaryByClass = async (classId, schoolYearIdQuery = null) => {
 // -------------------------------------------------------------
 // Cahier de textes (LessonLog)
 // -------------------------------------------------------------
+const notifyParentsAboutHomework = async (classId, subjectId, teacherId, homework, dueDate) => {
+  try {
+    if (!homework || !String(homework).trim()) return;
+    const students = await Student.find({ class: classId }).select("parents").lean();
+    const parentIds = new Set();
+    students.forEach((s) => {
+      (s.parents || []).forEach((p) => parentIds.add(String(p)));
+    });
+    if (parentIds.size === 0) return;
+
+    const [subject, teacher] = await Promise.all([
+      Subject.findById(subjectId).select("name").lean(),
+      User.findById(teacherId).select("firstName lastName").lean(),
+    ]);
+
+    const subjectName = subject?.name || "Matière";
+    const teacherName = teacher ? `${teacher.firstName} ${teacher.lastName}` : "L'enseignant";
+
+    const notifDocs = Array.from(parentIds).map((parentId) => ({
+      user: parentId,
+      title: `📝 Devoir : ${subjectName}`,
+      message: `${teacherName} a donné un devoir en ${subjectName} : "${String(homework).trim()}". À rendre pour le ${dueDate || "prochain cours"}.`,
+      type: "INFO",
+      link: "/parent/schedule",
+    }));
+
+    await Notification.insertMany(notifDocs, { ordered: false });
+  } catch (err) {
+    console.error("Erreur lors de la notification des devoirs aux parents:", err.message);
+  }
+};
+
 const createLessonLog = async (data, user) => {
   const { classId, subjectId, date, startTime, endTime, title, content, homework, dueDate, status, missedReason } = data;
 
@@ -562,6 +610,7 @@ const createLessonLog = async (data, user) => {
 
   const schoolYearId = await resolveSchoolYearId(data.schoolYearId);
   const hoursDone = data.hoursDone !== undefined ? Number(data.hoursDone) : calculateDurationHours(startTime, endTime);
+  const isSigned = data.signed === true;
 
   const log = await LessonLog.create({
     scheduleEntryId: data.scheduleEntryId || null,
@@ -578,9 +627,21 @@ const createLessonLog = async (data, user) => {
     content: content ? String(content).trim() : "",
     homework: homework ? String(homework).trim() : "",
     dueDate: dueDate || null,
+    chapterId: data.chapterId || null,
+    chapterTitle: data.chapterTitle ? String(data.chapterTitle).trim() : "",
+    sequenceId: data.sequenceId || null,
+    signed: isSigned,
+    signedAt: isSigned ? new Date() : null,
+    signedBy: isSigned ? user.id : null,
     missedReason: missedReason ? String(missedReason).trim() : "",
     makeupDate: data.makeupDate || null,
   });
+
+  if (isSigned && homework && homework.trim()) {
+    setImmediate(() => {
+      notifyParentsAboutHomework(classId, subjectId, teacherId, homework, dueDate);
+    });
+  }
 
   return LessonLog.findById(log._id)
     .populate("classId", "name level")
@@ -594,6 +655,11 @@ const updateLessonLog = async (id, data, user) => {
   const log = await LessonLog.findById(id);
   if (!log) throw httpError(404, "Séance de cahier de textes introuvable.");
 
+  // Si déjà signée et verrouillée, seul un admin ou censeur peut modifier
+  if (log.signed && user.role === "teacher" && !isCenseur(user)) {
+    throw httpError(403, "Cette séance a déjà été signée et soumise. Seul un administrateur ou censeur peut la modifier.");
+  }
+
   if (user.role === "teacher" && !isCenseur(user) && String(log.teacherId) !== String(user.id)) {
     throw httpError(403, "Vous ne pouvez modifier que vos propres séances.");
   }
@@ -602,6 +668,22 @@ const updateLessonLog = async (id, data, user) => {
   if (data.content !== undefined) log.content = String(data.content).trim();
   if (data.homework !== undefined) log.homework = String(data.homework).trim();
   if (data.dueDate !== undefined) log.dueDate = data.dueDate || null;
+  if (data.chapterId !== undefined) log.chapterId = data.chapterId || null;
+  if (data.chapterTitle !== undefined) log.chapterTitle = String(data.chapterTitle).trim();
+  if (data.sequenceId !== undefined) log.sequenceId = data.sequenceId || null;
+
+  const wasSigned = log.signed;
+  if (data.signed === true && !wasSigned) {
+    log.signed = true;
+    log.signedAt = new Date();
+    log.signedBy = user.id;
+  } else if (data.signed === false && (user.role === "admin" || isCenseur(user))) {
+    // Déverrouillage par l'admin
+    log.signed = false;
+    log.signedAt = null;
+    log.signedBy = null;
+  }
+
   if (data.status) {
     log.status = data.status;
     if (log.status === "MISSED" || log.status === "CANCELLED") {
@@ -619,6 +701,12 @@ const updateLessonLog = async (id, data, user) => {
 
   await log.save();
 
+  if (!wasSigned && log.signed && log.homework && log.homework.trim()) {
+    setImmediate(() => {
+      notifyParentsAboutHomework(log.classId, log.subjectId, log.teacherId, log.homework, log.dueDate);
+    });
+  }
+
   return LessonLog.findById(log._id)
     .populate("classId", "name level")
     .populate("subjectId", "name code")
@@ -630,6 +718,10 @@ const deleteLessonLog = async (id, user) => {
   if (!mongoose.isValidObjectId(id)) throw httpError(400, "Identifiant invalide.");
   const log = await LessonLog.findById(id);
   if (!log) throw httpError(404, "Séance introuvable.");
+
+  if (log.signed && user.role === "teacher" && !isCenseur(user)) {
+    throw httpError(403, "Impossible de supprimer une séance déjà signée et soumise.");
+  }
 
   if (user.role === "teacher" && !isCenseur(user) && String(log.teacherId) !== String(user.id)) {
     throw httpError(403, "Vous ne pouvez supprimer que vos propres séances.");
@@ -783,6 +875,13 @@ const getCenseurProgression = async ({ schoolYearId: syIdQuery, classId, periodI
     .populate("teacherId", "firstName lastName")
     .lean();
 
+  // Charger tous les programmes d'enseignement pour ces classes
+  const programs = await SubjectProgram.find({ classId: { $in: classIds }, schoolYearId }).lean();
+  const programMap = {};
+  for (const prog of programs) {
+    programMap[`${prog.classId}_${prog.subjectId}`] = prog;
+  }
+
   // Agréger par classe et matière
   const logsByClassSubject = {};
   for (const log of logs) {
@@ -851,6 +950,10 @@ const getCenseurProgression = async ({ schoolYearId: syIdQuery, classId, periodI
       doneCount: stats.doneCount,
       missedCount: stats.missedCount,
       alertLevel,
+      hasOfficialProgram: !!programMap[key],
+      programId: programMap[key]?._id || null,
+      totalChapters: programMap[key]?.chapters?.length || 0,
+      totalEstimatedSessions: programMap[key]?.totalEstimatedSessions || 0,
     });
   }
 

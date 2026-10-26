@@ -38,6 +38,12 @@ const schoolProfileSchema = new mongoose.Schema(
     logo: String, // image en data URL (PNG, JPEG ou WebP)
     primaryColor: String,
     defaultTemplate: { type: String, enum: BULLETIN_TEMPLATES, default: "officiel" },
+    // Géolocalisation & Périmètre de l'établissement (Pointage Enseignants)
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    radiusMeters: { type: Number, default: 200 }, // Rayon en mètres
+    kioskQrToken: { type: String, default: null },
+    kioskQrRotatedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

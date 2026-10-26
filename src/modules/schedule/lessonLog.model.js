@@ -27,6 +27,16 @@ const lessonLogSchema = new Schema(
     homework: { type: String, default: "", trim: true }, // Devoirs à faire
     dueDate: { type: String, default: null }, // "YYYY-MM-DD"
 
+    // Fiche de programme officielle (assignée par le proviseur)
+    chapterId: { type: Schema.Types.ObjectId, default: null, index: true },
+    chapterTitle: { type: String, default: "", trim: true },
+    sequenceId: { type: Schema.Types.ObjectId, ref: "Period", default: null, index: true },
+
+    // Signature et authentification de la séance par l'enseignant
+    signed: { type: Boolean, default: false, index: true },
+    signedAt: { type: Date, default: null },
+    signedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+
     missedReason: { type: String, default: "", trim: true },
     makeupDate: { type: String, default: null },
 
