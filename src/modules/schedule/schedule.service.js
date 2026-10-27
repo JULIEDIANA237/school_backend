@@ -486,8 +486,10 @@ const getScheduleByTeacher = async (teacherId, schoolYearIdQuery = null) => {
   if (assignments.length > 0) {
     const pairs = assignments.map((a) => ({ classId: a.classId, subjectId: a.subjectId }));
     orConditions.push({
-      $or: pairs,
-      $or: [{ teacherId: null }, { teacherId: { $exists: false } }],
+      $and: [
+        { $or: pairs },
+        { $or: [{ teacherId: null }, { teacherId: { $exists: false } }] },
+      ],
     });
   }
 
@@ -842,8 +844,10 @@ const getTodayTeacherSessions = async (teacherId, dayString = null) => {
   if (assignments.length > 0) {
     const pairs = assignments.map((a) => ({ classId: a.classId, subjectId: a.subjectId }));
     orConditions.push({
-      $or: pairs,
-      $or: [{ teacherId: null }, { teacherId: { $exists: false } }],
+      $and: [
+        { $or: pairs },
+        { $or: [{ teacherId: null }, { teacherId: { $exists: false } }] },
+      ],
     });
   }
 
