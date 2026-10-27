@@ -4,6 +4,7 @@ const TeacherAttendanceRecord = require("./teacherAttendance.model");
 const SchoolProfile = require("../school/school.model");
 const User = require("../users/user.model");
 const SchoolYear = require("../schoolYear/schoolYear.model");
+const { schoolDay, schoolTimeZone } = require("../../utils/school");
 
 /**
  * Formule de Haversine : distance en mètres entre deux coordonnées géographiques
@@ -169,8 +170,9 @@ async function recordTeacherAttendance(callerUser, payload) {
   const currentYear = await SchoolYear.findOne({ isCurrent: true }) || await SchoolYear.findOne().sort({ name: -1 });
   if (!currentYear) throw { status: 500, message: "Aucune année scolaire active configurée." };
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const nowTime = new Date().toLocaleTimeString("fr-FR", { hour12: false });
+  // Jour et heure dans le fuseau de l'établissement (le serveur Vercel tourne en UTC)
+  const todayStr = schoolDay();
+  const nowTime = new Date().toLocaleTimeString("fr-FR", { hour12: false, timeZone: schoolTimeZone() });
 
   // 1. Règle d'unicité : un seul pointage de ce type aujourd'hui
   const existingRecord = await TeacherAttendanceRecord.findOne({
@@ -242,7 +244,7 @@ async function recordTeacherAttendance(callerUser, payload) {
  * Registre de présence du jour pour l'administration et le censeur
  */
 async function getTodayAttendanceRegister(dateQuery) {
-  const todayStr = dateQuery || new Date().toISOString().slice(0, 10);
+  const todayStr = dateQuery || schoolDay();
   const teachers = await User.find({ role: "teacher", isActive: { $ne: false } })
     .select("firstName lastName email phone")
     .sort({ lastName: 1 })
