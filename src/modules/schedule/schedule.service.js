@@ -15,6 +15,7 @@ const Evaluation = require("../evaluations/evaluation.model");
 const AttendanceSession = require("../vieScolaire/attendanceSession.model");
 const Notification = require("../notifications/notification.model");
 const SubjectProgram = require("../programs/subjectProgram.model");
+const TeacherAssignment = require("../teachers/teacherAssignment.model");
 const { httpError } = require("../../utils/httpError");
 const { isCenseur, isTeacherOfClass, sameId } = require("../../utils/access");
 
@@ -473,8 +474,25 @@ const getScheduleByTeacher = async (teacherId, schoolYearIdQuery = null) => {
 
   const schoolYearId = await resolveSchoolYearId(schoolYearIdQuery);
 
-  const entries = await ScheduleEntry.find({
+  // Trouver aussi les affectations actives de cet enseignant
+  const assignments = await TeacherAssignment.find({
     teacherId,
+    schoolYearId,
+    isActive: true,
+  }).lean();
+
+  const orConditions = [{ teacherId }];
+
+  if (assignments.length > 0) {
+    const pairs = assignments.map((a) => ({ classId: a.classId, subjectId: a.subjectId }));
+    orConditions.push({
+      $or: pairs,
+      $or: [{ teacherId: null }, { teacherId: { $exists: false } }],
+    });
+  }
+
+  const entries = await ScheduleEntry.find({
+    $or: orConditions,
     schoolYearId,
     isActive: true,
   })
@@ -813,8 +831,24 @@ const getTodayTeacherSessions = async (teacherId, dayString = null) => {
   let jsDay = dateObj.getDay(); // 0 = Dimanche, 1 = Lundi, ...
   const dayOfWeek = jsDay === 0 ? 7 : jsDay; // 1 to 6 (Lundi to Samedi)
 
-  const entries = await ScheduleEntry.find({
+  // Trouver aussi les affectations actives de cet enseignant
+  const assignments = await TeacherAssignment.find({
     teacherId,
+    isActive: true,
+  }).lean();
+
+  const orConditions = [{ teacherId }];
+
+  if (assignments.length > 0) {
+    const pairs = assignments.map((a) => ({ classId: a.classId, subjectId: a.subjectId }));
+    orConditions.push({
+      $or: pairs,
+      $or: [{ teacherId: null }, { teacherId: { $exists: false } }],
+    });
+  }
+
+  const entries = await ScheduleEntry.find({
+    $or: orConditions,
     dayOfWeek,
     isActive: true,
   })
@@ -835,11 +869,24 @@ const getTodayTeacherSessions = async (teacherId, dayString = null) => {
       startTime: entry.startTime,
     }).lean();
 
-    const attendance = await AttendanceSession.findOne({
+    // 1. Recherche exacte par créneau horaire
+    let attendance = await AttendanceSession.findOne({
       class: entry.classId?._id,
       day,
       startTime: entry.startTime,
     }).lean();
+
+    // 2. Recherche avec tolérance si l'appel a été fait pour cette classe et ce jour par cet enseignant ou pour cette matière
+    if (!attendance) {
+      attendance = await AttendanceSession.findOne({
+        class: entry.classId?._id,
+        day,
+        $or: [
+          { takenBy: teacherId },
+          { subject: entry.subjectId?._id },
+        ],
+      }).lean();
+    }
 
     result.push({
       scheduleEntry: entry,

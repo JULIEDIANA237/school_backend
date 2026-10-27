@@ -8,10 +8,15 @@ const Period = require("../periods/period.model");
 const TeacherAssignment = require("../teachers/teacherAssignment.model");
 
 /**
- * Calcule le total des séances estimées d'une liste de chapitres
+ * Calcule le total des séances estimées d'une liste de chapitres/modules
  */
 const calculateTotalSessions = (chapters = []) =>
-  chapters.reduce((sum, ch) => sum + (Number(ch.estimatedSessions) || 1), 0);
+  chapters.reduce((sum, ch) => {
+    if (ch.lessons && ch.lessons.length > 0) {
+      return sum + ch.lessons.reduce((lSum, l) => lSum + (Number(l.durationHours) || 1), 0);
+    }
+    return sum + (Number(ch.estimatedSessions) || 1);
+  }, 0);
 
 /**
  * Récupère l'enseignant assigné à une classe et matière si non spécifié
@@ -210,13 +215,19 @@ async function importProgramsFromExcel(buffer, schoolYearId, userId) {
     const rawClass = String(row["Classe"] || row["classe"] || row["Class"] || "").trim().toLowerCase();
     const rawSubject = String(row["Matiere"] || row["matière"] || row["Matière"] || row["Subject"] || "").trim().toLowerCase();
     const rawSequence = String(row["Sequence"] || row["séquence"] || row["Séquence"] || "").trim().toLowerCase();
-    const title = String(row["Titre"] || row["titre"] || row["Chapitre"] || row["Leçon"] || row["Module"] || "").trim();
+
+    // Module / Chapitre et Leçon
+    const rawModule = String(row["Module"] || row["module"] || row["Chapitre"] || row["chapitre"] || "").trim();
+    const rawLesson = String(row["Lecon"] || row["lecon"] || row["Leçon"] || row["leçon"] || row["Titre"] || row["titre"] || "").trim();
+    const moduleTitle = rawModule || rawLesson;
+    const lessonTitle = rawModule ? rawLesson : "";
+
     const objectives = String(row["Objectifs"] || row["objectifs"] || row["Compétences"] || "").trim();
-    const sessions = parseInt(row["Seances"] || row["séances"] || row["Séances"] || row["Heures"] || 2, 10);
+    const sessions = parseInt(row["Seances"] || row["séances"] || row["Séances"] || row["Heures"] || row["heures"] || 1, 10);
     const order = parseInt(row["Ordre"] || row["ordre"] || row["N°"] || 1, 10);
 
-    if (!rawClass || !rawSubject || !title) {
-      errors.push(`Ligne ${rowNum} ignorée : Classe, Matière et Titre sont obligatoires.`);
+    if (!rawClass || !rawSubject || !moduleTitle) {
+      errors.push(`Ligne ${rowNum} ignorée : Classe, Matière et Module/Titre sont obligatoires.`);
       continue;
     }
 
@@ -249,29 +260,48 @@ async function importProgramsFromExcel(buffer, schoolYearId, userId) {
       groupedPrograms.set(key, {
         classId,
         subjectId,
-        chapters: [],
+        chaptersMap: new Map(), // moduleTitle -> chapterObj
       });
     }
 
-    groupedPrograms.get(key).chapters.push({
-      sequenceId,
-      sequenceName,
-      order: isNaN(order) ? 1 : order,
-      title,
-      objectives,
-      estimatedSessions: isNaN(sessions) || sessions < 1 ? 2 : sessions,
-    });
+    const progData = groupedPrograms.get(key);
+    if (!progData.chaptersMap.has(moduleTitle)) {
+      progData.chaptersMap.set(moduleTitle, {
+        sequenceId,
+        sequenceName,
+        order: isNaN(order) ? progData.chaptersMap.size + 1 : order,
+        title: moduleTitle,
+        objectives: rawModule ? "" : objectives,
+        estimatedSessions: 0,
+        lessons: [],
+      });
+    }
+
+    const chapterObj = progData.chaptersMap.get(moduleTitle);
+    if (lessonTitle) {
+      chapterObj.lessons.push({
+        order: chapterObj.lessons.length + 1,
+        title: lessonTitle,
+        objectives,
+        durationHours: isNaN(sessions) || sessions < 1 ? 1 : sessions,
+      });
+      chapterObj.estimatedSessions += isNaN(sessions) || sessions < 1 ? 1 : sessions;
+    } else {
+      chapterObj.objectives = objectives || chapterObj.objectives;
+      chapterObj.estimatedSessions = isNaN(sessions) || sessions < 1 ? 2 : sessions;
+    }
   }
 
   let createdCount = 0;
   let updatedCount = 0;
 
   for (const [, item] of groupedPrograms) {
+    const chapters = Array.from(item.chaptersMap.values());
     // Trier les chapitres par ordre
-    item.chapters.sort((a, b) => a.order - b.order);
+    chapters.sort((a, b) => a.order - b.order);
 
     const teacherId = await resolveTeacherId(item.classId, item.subjectId, schoolYearId);
-    const totalSessions = calculateTotalSessions(item.chapters);
+    const totalSessions = calculateTotalSessions(chapters);
 
     const existing = await SubjectProgram.findOne({
       classId: item.classId,
@@ -280,7 +310,7 @@ async function importProgramsFromExcel(buffer, schoolYearId, userId) {
     });
 
     if (existing) {
-      existing.chapters = item.chapters;
+      existing.chapters = chapters;
       existing.totalEstimatedSessions = totalSessions;
       if (teacherId) existing.teacherId = teacherId;
       await existing.save();
@@ -292,7 +322,7 @@ async function importProgramsFromExcel(buffer, schoolYearId, userId) {
         teacherId,
         schoolYearId,
         createdBy: userId,
-        chapters: item.chapters,
+        chapters,
         totalEstimatedSessions: totalSessions,
       });
       createdCount += 1;
