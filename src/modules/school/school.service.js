@@ -67,6 +67,10 @@ const toProfile = (doc) => {
     const value = doc?.[key];
     if (typeof value === "string" && value.trim() !== "") profile[key] = value;
   }
+  // Périmètre du pointage géolocalisé (page « Pointage » de l'administration)
+  profile.latitude = typeof doc?.latitude === "number" ? doc.latitude : null;
+  profile.longitude = typeof doc?.longitude === "number" ? doc.longitude : null;
+  profile.radiusMeters = typeof doc?.radiusMeters === "number" ? doc.radiusMeters : 200;
   profile.isConfigured = Boolean(doc?.name?.trim());
   profile.templates = BULLETIN_TEMPLATES;
   return profile;
@@ -123,6 +127,25 @@ const updateSchoolProfile = async (data = {}) => {
     $set.primaryColor = String(data.primaryColor).toLowerCase();
   }
   if (data.defaultTemplate !== undefined) $set.defaultTemplate = assertTemplate(data.defaultTemplate);
+
+  // Coordonnées GPS de l'établissement : null efface, sinon un nombre dans les bornes
+  for (const [field, min, max] of [["latitude", -90, 90], ["longitude", -180, 180]]) {
+    if (data[field] === undefined) continue;
+    if (data[field] === null || data[field] === "") {
+      $unset[field] = 1;
+      continue;
+    }
+    const value = Number(data[field]);
+    if (!Number.isFinite(value) || value < min || value > max) throw httpError(400, `« ${field} » invalide.`);
+    $set[field] = value;
+  }
+  if (data.radiusMeters !== undefined) {
+    const radius = Number(data.radiusMeters);
+    if (!Number.isInteger(radius) || radius < 20 || radius > 5000) {
+      throw httpError(400, "Rayon invalide : entre 20 et 5000 mètres.");
+    }
+    $set.radiusMeters = radius;
+  }
 
   const update = {};
   if (Object.keys($set).length) update.$set = $set;

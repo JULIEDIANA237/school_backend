@@ -58,6 +58,24 @@ describe("Profil de l'établissement", () => {
     assert.equal(ok.body.defaultTemplate, "classique");
     assert.equal((await request(app).get("/api/school")).body.name, "Lycée bilingue Les Lauriers");
   });
+
+  test("périmètre GPS du pointage enregistré et contrôlé", async () => {
+    const put = (body) => request(app).put("/api/school").set(as(d.admin)).send(body);
+    assert.equal((await put({ latitude: 120 })).status, 400);
+    assert.equal((await put({ longitude: "abc" })).status, 400);
+    assert.equal((await put({ radiusMeters: 5 })).status, 400);
+
+    const ok = await put({ latitude: 3.874, longitude: 11.449, radiusMeters: 250 });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.latitude, 3.874);
+    assert.equal(ok.body.longitude, 11.449);
+    assert.equal(ok.body.radiusMeters, 250);
+    assert.equal(ok.body.name, "Lycée bilingue Les Lauriers");
+
+    const cleared = await put({ latitude: null, longitude: null });
+    assert.equal(cleared.body.latitude, null);
+    assert.equal(cleared.body.longitude, null);
+  });
 });
 
 describe("Modèle de bulletin choisi à la génération", () => {
