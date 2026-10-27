@@ -45,6 +45,7 @@ describe("Pointage Géolocalisé des Enseignants (GPS + QR Dynamique)", () => {
      1. Mode A : Borne Kiosk de l'établissement
      ------------------------------------------------------------- */
   let kioskToken;
+  let kioskShortCode;
 
   it("L'écran Kiosk de l'école récupère le QR code dynamique", async () => {
     const res = await request(app)
@@ -55,7 +56,9 @@ describe("Pointage Géolocalisé des Enseignants (GPS + QR Dynamique)", () => {
     assert.ok(res.body.kioskQrToken);
     assert.equal(res.body.ttlSeconds, 30);
     assert.equal(res.body.radiusMeters, 200);
+    assert.match(res.body.kioskShortCode, /^\d{6}$/);
     kioskToken = res.body.kioskQrToken;
+    kioskShortCode = res.body.kioskShortCode;
   });
 
   it("Pointage ARRIVÉE Enseignant A dans le périmètre (Mode A) -> VALID", async () => {
@@ -138,6 +141,27 @@ describe("Pointage Géolocalisé des Enseignants (GPS + QR Dynamique)", () => {
 
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.equal(res.body.status, "VALID");
+    assert.equal(res.body.record.type, "DEPARTURE");
+  });
+
+  it("Code à 6 chiffres erroné refusé (400)", async () => {
+    const wrongCode = String((Number(kioskShortCode) + 1) % 1000000).padStart(6, "0");
+    const res = await request(app)
+      .post("/api/geo-attendance/checkin")
+      .set("Authorization", `Bearer ${teacherBToken}`)
+      .send({ type: "DEPARTURE", mode: "KIOSK_SCAN", qrToken: wrongCode, lat: IN_RADIUS_LAT, lng: IN_RADIUS_LNG });
+
+    assert.equal(res.status, 400);
+  });
+
+  it("Pointage DÉPART Enseignant B avec le code à 6 chiffres saisi à la main -> 201", async () => {
+    const typed = `${kioskShortCode.slice(0, 3)} ${kioskShortCode.slice(3)}`;
+    const res = await request(app)
+      .post("/api/geo-attendance/checkin")
+      .set("Authorization", `Bearer ${teacherBToken}`)
+      .send({ type: "DEPARTURE", mode: "KIOSK_SCAN", qrToken: typed, lat: IN_RADIUS_LAT, lng: IN_RADIUS_LNG });
+
+    assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.equal(res.body.record.type, "DEPARTURE");
   });
 
