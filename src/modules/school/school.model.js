@@ -43,6 +43,8 @@ const schoolProfileSchema = new mongoose.Schema(
     longitude: { type: Number, default: null },
     radiusMeters: { type: Number, default: 200 }, // Rayon en mètres
     kioskQrToken: { type: String, default: null },
+    // Code à 6 chiffres affiché sous le QR de la borne, pour la saisie manuelle (même durée de vie)
+    kioskShortCode: { type: String, default: null },
     kioskQrRotatedAt: { type: Date, default: null },
   },
   { timestamps: true }

@@ -56,10 +56,11 @@ class MongoRateLimitStore {
   }
 }
 
-const createLimiter = ({ name, windowMs, limit, keyGenerator, message }) =>
+const createLimiter = ({ name, windowMs, limit, keyGenerator, message, skipSuccessfulRequests = false }) =>
   rateLimit({
     windowMs,
     limit,
+    skipSuccessfulRequests,
     standardHeaders: true,
     legacyHeaders: false,
     // En cas de panne du compteur, on laisse passer plutôt que de bloquer tout le monde.

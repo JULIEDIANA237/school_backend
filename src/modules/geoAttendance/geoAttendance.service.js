@@ -24,6 +24,11 @@ function generateHexToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
+/** Code à 6 chiffres de la borne, pour la saisie manuelle quand la caméra est indisponible */
+function generateShortCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+
 const QR_TTL_SECONDS = 30;
 
 /** Cache mémoire pour les badges dynamiques des enseignants (Mode B) */
@@ -49,8 +54,9 @@ async function getKioskQr() {
   const lastRotated = school.kioskQrRotatedAt ? new Date(school.kioskQrRotatedAt).getTime() : 0;
   const isExpired = !school.kioskQrToken || now - lastRotated >= QR_TTL_SECONDS * 1000;
 
-  if (isExpired) {
+  if (isExpired || !school.kioskShortCode) {
     school.kioskQrToken = generateHexToken();
+    school.kioskShortCode = generateShortCode();
     school.kioskQrRotatedAt = new Date();
     await school.save();
   }
@@ -60,6 +66,7 @@ async function getKioskQr() {
 
   return {
     kioskQrToken: school.kioskQrToken,
+    kioskShortCode: school.kioskShortCode,
     qrRotatedAt: school.kioskQrRotatedAt,
     ttlSeconds: QR_TTL_SECONDS,
     remainingSeconds,
@@ -76,10 +83,12 @@ async function getKioskQr() {
 async function rotateKioskQr() {
   const school = await getSchoolConfig();
   school.kioskQrToken = generateHexToken();
+  school.kioskShortCode = generateShortCode();
   school.kioskQrRotatedAt = new Date();
   await school.save();
   return {
     kioskQrToken: school.kioskQrToken,
+    kioskShortCode: school.kioskShortCode,
     qrRotatedAt: school.kioskQrRotatedAt,
     ttlSeconds: QR_TTL_SECONDS,
   };
@@ -139,7 +148,11 @@ async function recordTeacherAttendance(callerUser, payload) {
     // Vérification du jeton de la borne
     const now = Date.now();
     const tokenAge = school.kioskQrRotatedAt ? (now - new Date(school.kioskQrRotatedAt).getTime()) / 1000 : 999;
-    if (school.kioskQrToken !== qrToken || tokenAge > QR_TTL_SECONDS + 10) {
+    // Jeton du QR, ou code à 6 chiffres saisi à la main (espaces ignorés)
+    const typedCode = String(qrToken).replace(/\s+/g, "");
+    const matchesQr = school.kioskQrToken === qrToken;
+    const matchesShortCode = /^\d{6}$/.test(typedCode) && school.kioskShortCode === typedCode;
+    if (!(matchesQr || matchesShortCode) || tokenAge > QR_TTL_SECONDS + 10) {
       throw { status: 400, message: "Le QR Code de la borne a expiré. Veuillez rescanner." };
     }
   } else {
